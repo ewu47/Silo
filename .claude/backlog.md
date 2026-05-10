@@ -1,73 +1,63 @@
 # backlog.md — Silo Task Backlog
 
-> Loose prioritized checklist. Update freely as things change.
-> P0 = must have for demo | P1 = should have | P2 = nice to have
+> Prioritized checklist. P0 = must have for demo | P1 = should have | P2 = nice to have
 
 ---
 
-## Before the Build Session
+## Done
 
-- [x] Confirm USDA Market News API works — ✓ Basic auth, real slugs from `/reports`
-- [x] Confirm yfinance returns live futures — ✓ ZS=F, ZC=F, ZW=F all working
-- [x] Confirm NOAA NWS works — ✓ no key needed
-- [x] Confirm FRED works — ✓ diesel + T-bill confirmed
-- [x] Precompute seasonal tendency — ✓ logic proven in notebook
-- [ ] Fix Google Maps key (billing) or accept geopy fallback
-- [ ] Get Anthropic API key ready
-- [ ] Scaffold monorepo: Next.js 14 + FastAPI
-
----
-
-## P0 — Core Demo Path
-
-**Data layer**
-- [ ] Async fetchers for: yfinance (futures), USDA (cash bid), NOAA (weather), FRED (diesel + T-bill rate)
-- [ ] Static fallbacks for all four — demo cannot crash if an API is down
-
-**Quantitative engine**
-- [ ] Transport net revenue: `(Bid × Qty) − (Distance × Qty × $0.042/bu/mile)`
-- [ ] Storage value model: `E[P_future] − P_now − holding_cost`
-- [ ] Wait scenario expected values + ranges (from seasonal lookup + MPI)
-- [ ] Market Pressure Index (MPI)
-
-**API**
-- [ ] `POST /analyze` endpoint — takes farmer input, returns structured JSON with buyers, scenarios, market signals
-
-**Frontend**
-- [ ] Input form: crop, quantity, farm address, up to 3 buyers (name + bid + address), storage toggle, urgency, window
-- [ ] Buyer comparison table: gross revenue, transport cost, net revenue, net $/bu per buyer
-- [ ] Scenario cards: Sell Now / Wait 2 Weeks / Wait 1 Month — with expected value, range, confidence
-- [ ] LLM explanation panel — streamed, labeled clearly as AI interpretation
-- [ ] Futures trend chart (Recharts)
-- [ ] Loading states with informative status messages
-
-**Deploy**
-- [ ] Backend on Railway, frontend on Vercel, end-to-end working on deployed URLs
+- [x] Confirm all external APIs work (USDA, yfinance, NOAA, FRED)
+- [x] Google Maps fallback — geopy straight-line × 1.25 road factor
+- [x] FastAPI backend — `/health`, `/market`, `/analyze`, `/history/{commodity}`, `/nearby`
+- [x] Pydantic models for all request/response shapes
+- [x] All constants centralized in `backend/constants.py`
+- [x] Full quantitative engine: fair_price, transport, storage, scenarios, MPI, features
+- [x] All fetchers with fallbacks: yfinance, FRED, NOAA, geopy, USDA, RSS news
+- [x] Next.js frontend scaffolded with shadcn/ui, Recharts, react-hook-form + Zod, framer-motion, KaTeX
+- [x] Market dashboard — live futures quotes, diesel, T-bill, weather, ag headlines
+- [x] Analyze form — crop, quantity, farm address, up to 5 buyers, storage toggle, urgency
+- [x] Buyer comparison table — gross revenue, transport cost, net revenue per buyer
+- [x] Scenario cards — Sell Now / Wait 1 Week / Wait 1 Month / Store & Hedge with EV, range, confidence
+- [x] Scenario EV chart — zoomed bar + error whiskers, recommended reference line
+- [x] Fair price analysis panel
+- [x] Market signals panel (MPI, basis, volatility, weather risk)
+- [x] LLM explanation panel (Gemini 2.0 Flash interprets structured JSON)
+- [x] Price history chart — OHLCV + SMA20/SMA50
+- [x] **Methodology page (Page 3)** — KaTeX formulas, animated flow/fan-in graphs (framer-motion), green highlights, all 4 models + data sources documented
+- [x] **Nearby elevator lookup** — `GET /nearby`, geocodes farm address via Nominatim, returns elevators within 50mi from static Midwest dataset; sidebar shows results with "+ Add" to prefill buyer row
+- [x] **Graph zoom** — drag-to-zoom (ReferenceArea selection) + Brush scrubber on price history chart; "Reset zoom" button; period buttons reset zoom
+- [x] **Layout fix** — content now extends full width (removed max-w-5xl)
+- [x] **Font/spacing bump** — sidebar wider (w-80), inputs taller, section spacing improved
 
 ---
 
-## P1 — Presentation Quality
+## P0 — Before Demo
+
+- [ ] Fix Google Maps key (enable billing) — geopy fallback is live but driving distance is more accurate
+- [ ] Deploy backend to Railway, frontend to Vercel — end-to-end on live URLs
+- [ ] Verify all API keys set in production env (FRED, USDA, Gemini, Google Maps)
+
+---
+
+## P1 — Remaining Quality
 
 - [ ] Basis movement chart (cash vs. futures, 30 days)
-- [ ] Weather / drought indicator widget (NOAA NWS forecast only — no historical data needed)
 - [ ] Seasonal tendency indicator ("IL soybeans this time of year: historically +2.8% over 2 weeks")
-- [ ] MPI direction label on dashboard (Bullish / Neutral / Bearish)
-- [ ] Confidence badge on each scenario card (color-coded)
-- [ ] LLM response streams word-by-word (not all at once)
-- [ ] Error states handled gracefully — no crashes, just inline notices
+- [ ] LLM response streams word-by-word
+- [ ] Split strategy suggestion ("sell 50% now, store 50%")
+- [ ] Scenario deep-dive: show full calculation breakdown for a clicked scenario
 
 ---
 
-## P2 — If Time Allows
+## P2 — Polish
 
-- [ ] ~~Corn support~~ — corn and wheat are already in scope from the start, not an add-on
-- [ ] Split strategy suggestion ("sell 50% now, store 50%")
-- [ ] Scenario deep-dive: show the full calculation breakdown for a clicked scenario
+- [ ] Confidence badge color-coding on scenario cards
+- [ ] Error states handled gracefully — no crashes, just inline notices
 - [ ] PDF export of the analysis
 
 ---
 
-## Post-Hackathon (Don't Touch During Build)
+## Post-Hackathon
 
 - [ ] User auth + saved analyses
 - [ ] Multi-region / multi-crop UI controls

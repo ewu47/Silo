@@ -20,6 +20,7 @@ from backend.fetchers.futures import get_futures_features
 from backend.fetchers.fred import get_diesel_price, get_tbill_rate
 from backend.fetchers.weather import get_weather_data
 from backend.fetchers.news import get_ag_headlines
+from backend.fetchers.nearby_elevators import get_nearby_elevators
 from backend.llm import get_llm_explanation
 
 app = FastAPI(title="Silo API", version="2.0.0")
@@ -35,6 +36,18 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/nearby")
+def nearby_elevators(address: str, radius: float = 50):
+    """
+    Return grain elevators within `radius` miles (default 50) of the given farm address.
+    Sorted by distance ascending.
+    """
+    if radius < 1 or radius > 100:
+        raise HTTPException(status_code=400, detail="radius must be 1–100")
+    results = get_nearby_elevators(address, radius_miles=radius)
+    return {"address": address, "radius_miles": radius, "count": len(results), "elevators": results}
 
 
 @app.get("/market", response_model=MarketContextResponse)

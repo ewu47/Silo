@@ -13,22 +13,64 @@ Reframed to: a **sale optimization engine**. Same public data, different questio
 
 ---
 
-## Decisions
+## Architecture Decisions
 
 **LLM is an interpreter, not a calculator.**
-The AI layer receives structured JSON from the quantitative engine and explains it. It never generates prices. This is the core architectural principle — judges will probe it, and it's the honest approach.
+The AI layer (Gemini 2.0 Flash) receives structured JSON from the quantitative engine and explains it. It never generates prices. This is the core architectural principle — judges will probe it.
 
 **Outputs are probabilistic ranges, not predictions.**
-We don't predict commodity prices. Scenario outputs show expected-value ranges derived from historical basis volatility. Always include confidence labels and range bounds.
+Scenario outputs show expected-value ranges derived from historical basis volatility. Always include confidence labels and range bounds.
 
 **Multi-buyer comparison is the core use case.**
-The most resonant insight from user research: "should I drive farther for a better bid?" It's concrete, computable, and has a specific dollar answer. Lead with this in the demo.
+The most resonant insight from user research: "should I drive farther for a better bid?" Lead with this in the demo.
 
 **Farm address as origin, buyer addresses as destinations.**
-Distance should never be a manual input. Google Maps Distance Matrix computes driving distance from the farmer's address to each buyer's address in one API call.
+Distance is never a manual input. Google Maps Distance Matrix computes driving distance (needs billing enabled). Active fallback: geopy straight-line × 1.25 road factor.
+
+**Nearby elevator lookup uses a static dataset + Nominatim.**
+No free live elevator-bid API exists. Static dataset of ~30 Midwest elevator locations geocoded against the farmer's address via OpenStreetMap/Nominatim (no API key). Returns elevators within 50mi, farmer still enters bids manually. Served at `GET /nearby`.
 
 **Illinois soybeans as the demo scope.**
-Scopes the data calls without hardcoding logic. Corn/wheat are config swaps (ticker string + USDA region code). Other states are a region code change.
+Corn/wheat are config swaps (different ticker + USDA region code). Other states are a region code change.
+
+**No Zustand — local state is enough.**
+The app is a single-page form + results display. useState + react-hook-form covers it.
+
+**`/market` endpoint is the homepage.**
+Live market dashboard (futures quotes, diesel, weather, ag headlines). No farmer input required.
+
+---
+
+## What's Been Built (as of 2026-05-10)
+
+**Backend**
+- Full quantitative engine: features, fair_price, transport, storage, scenarios, MPI
+- All fetchers with fallbacks: yfinance, FRED, NOAA, geopy, USDA, RSS news, nearby_elevators
+- FastAPI endpoints: `/health`, `/market`, `/analyze`, `/history/{commodity}`, `/nearby`
+- All Pydantic models, constants centralized in `backend/constants.py`
+
+**Frontend**
+- Market dashboard, analyze form, buyer comparison, scenario cards, price history chart
+- Fair price panel, market signals panel, storage analysis panel, LLM explanation panel
+- **Scenario EV chart** — zoomed bar + error whiskers (not 3 separate bars), recommended reference line
+- **Methodology page (Page 3)** — KaTeX-rendered formulas, animated flow/fan-in graphs via framer-motion, selective green highlights, all 4 models + data sources documented
+- **Nearby elevator lookup** — "Find nearby elevators" button geocodes farm address, shows results in sidebar with distance + "+ Add" to prefill buyer rows
+- **Chart zoom** — drag-to-zoom (ReferenceArea) + Brush scrubber on price history chart; period buttons reset zoom
+- **Layout/UX** — full-width content (no max-w cap), wider sidebar (w-80), larger inputs, better spacing
+
+**Packages added:** `katex`, `react-katex`, `@types/react-katex`, `framer-motion`
+
+---
+
+## API Findings (from data_exploration.ipynb)
+
+- **USDA**: confirmed working. Auth is HTTP Basic (API key as username, blank password). `/reports` returns 1049 real reports. Slug IDs must be read from that list.
+- **yfinance**: confirmed working for `ZS=F`, `ZC=F`, `ZW=F`. Prices in cents/bu. Forward contract tickers (e.g. `ZSN26.CBT`) return no data — front-month only.
+- **NOAA NWS**: confirmed working, no key needed.
+- **FRED**: confirmed working. Diesel at ~$5.64/gal, T-bill at ~3.61%.
+- **Google Maps**: `REQUEST_DENIED` — billing not enabled on current key. Fallback is geopy × 1.25.
+- **Cash bids by location**: no free programmatic source exists. Farmer inputs bid manually. USDA IL average used as regional benchmark only.
+- **Nearby elevators**: no live API exists. Static dataset of ~30 Midwest locations; geocoding via Nominatim (OpenStreetMap).
 
 ---
 
@@ -37,20 +79,3 @@ Scopes the data calls without hardcoding logic. Corn/wheat are config swaps (tic
 - Talk to domain experts before architecting. The original framing was wrong and would have been caught immediately by any farmer or ag economist.
 - Probabilistic output framing is stronger than predictive for technical judges — it shows you understand the problem's complexity.
 - Don't over-engineer the memory files before the build starts. Keep them flexible until real decisions get made in code.
-
----
-
-## API Findings (from data_exploration.ipynb)
-
-- **USDA**: confirmed working. Auth is HTTP Basic (API key as username, blank password). `/reports` returns 1049 real reports. Slug IDs must be read from that list.
-- **yfinance**: confirmed working for `ZS=F`, `ZC=F`, `ZW=F`. Prices in cents/bu. Forward contract tickers (e.g. `ZSN26.CBT`) return no data via yfinance — front-month only.
-- **NOAA NWS**: confirmed working, no key needed.
-- **FRED**: confirmed working. Diesel at ~$5.64/gal, T-bill at ~3.61%.
-- **Google Maps**: `REQUEST_DENIED` — billing likely not enabled on current key. Fallback is geopy.
-- **Cash bids by location**: no free programmatic source exists. Farmer inputs bid manually. USDA IL average used as regional benchmark only.
-
-## Resolved Questions
-
-- ~~Which USDA endpoint returns IL cash bids?~~ — real slugs must be pulled from `/reports` list, not guessed.
-- ~~If USDA is unreliable, what's the fallback?~~ — USDA works; cash bid is a manual input anyway.
-- Should the LLM re-prompt when a farmer clicks a specific scenario card, or explain all scenarios in one pass? (still open)

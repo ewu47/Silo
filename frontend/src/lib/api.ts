@@ -35,6 +35,24 @@ export const fetchMarketContext = (location?: string) =>
 export const fetchPriceHistory = (commodity: string, period = "6mo") =>
   get<PriceHistoryResponse>(`/history/${commodity}`, { period });
 
+export interface NearbyElevator {
+  name: string;
+  address: string;
+  lat: number;
+  lon: number;
+  distance_miles: number;
+}
+
+export interface NearbyResponse {
+  address: string;
+  radius_miles: number;
+  count: number;
+  elevators: NearbyElevator[];
+}
+
+export const fetchNearbyElevators = (address: string, radius = 50) =>
+  get<NearbyResponse>("/nearby", { address, radius: String(radius) });
+
 export const MOCK_RESPONSE: AnalyzeResponse = {
   commodity: "soybeans",
   quantity_bu: 10000,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   ComposedChart,
   Line,
@@ -12,8 +12,10 @@ import {
   ResponsiveContainer,
   Legend,
   ReferenceLine,
+  Brush,
+  ReferenceArea,
 } from "recharts";
-import { TrendingUp, TrendingDown, Loader2, RefreshCw } from "lucide-react";
+import { TrendingUp, TrendingDown, Loader2, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchPriceHistory } from "@/lib/api";
 import type { PriceHistoryResponse } from "@/lib/types";
 
@@ -111,6 +113,13 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Zoom state: null = full range; numbers are indices into chartRows
+  const [zoomLeft, setZoomLeft] = useState<string | null>(null);
+  const [zoomRight, setZoomRight] = useState<string | null>(null);
+  const [dragStart, setDragStart] = useState<string | null>(null);
+  const [viewWindow, setViewWindow] = useState<{ start: number; end: number } | null>(null);
+  const isZooming = useRef(false);
+
   const load = useCallback(async () => {
     if (useMock) { setData(MOCK_HISTORY); return; }
     setLoading(true);
@@ -126,7 +135,10 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
     }
   }, [commodity, period, useMock]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    setViewWindow(null); // reset zoom when period changes
+  }, [load]);
 
   if (!data) {
     return (
@@ -137,8 +149,9 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
   }
 
   // Build flat chart rows
-  const chartRows = data.bars.map((b, i) => ({
+  const allRows = data.bars.map((b, i) => ({
     date: formatDate(b.date, period),
+    rawDate: b.date,
     close: b.close,
     open: b.open,
     high: b.high,
@@ -146,18 +159,55 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
     volume: b.volume ?? 0,
     sma20: data.sma_20[i],
     sma50: data.sma_50[i],
-    // price range bar for candlestick-style: [low, high]
     range: [b.low, b.high] as [number, number],
-    // body bar: [min(open,close), max(open,close)]
     body: [Math.min(b.open, b.close), Math.max(b.open, b.close)] as [number, number],
     bullish: b.close >= b.open,
   }));
 
+  // Apply zoom window
+  const chartRows = viewWindow
+    ? allRows.slice(viewWindow.start, viewWindow.end + 1)
+    : allRows;
+
+  // Drag-select zoom handlers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleMouseDown(e: any) {
+    if (!e?.activeLabel) return;
+    isZooming.current = true;
+    setDragStart(e.activeLabel);
+    setZoomLeft(e.activeLabel);
+    setZoomRight(null);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleMouseMove(e: any) {
+    if (!isZooming.current || !e?.activeLabel) return;
+    setZoomRight(e.activeLabel);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleMouseUp(e: any) {
+    if (!isZooming.current) return;
+    isZooming.current = false;
+    const endLabel = e?.activeLabel ?? zoomRight;
+    if (!dragStart || !endLabel || dragStart === endLabel) {
+      setDragStart(null); setZoomLeft(null); setZoomRight(null);
+      return;
+    }
+    const idxA = chartRows.findIndex((r) => r.date === dragStart);
+    const idxB = chartRows.findIndex((r) => r.date === endLabel);
+    if (idxA < 0 || idxB < 0) { setDragStart(null); setZoomLeft(null); setZoomRight(null); return; }
+    const [lo, hi] = idxA < idxB ? [idxA, idxB] : [idxB, idxA];
+    const baseStart = viewWindow?.start ?? 0;
+    setViewWindow({ start: baseStart + lo, end: baseStart + hi });
+    setDragStart(null); setZoomLeft(null); setZoomRight(null);
+  }
+
+  function resetZoom() { setViewWindow(null); }
+
   // Thin out x-axis labels for readability
   const tickInterval = Math.max(1, Math.floor(chartRows.length / 8));
 
-  const priceMin = Math.min(...data.bars.map((b) => b.low)) * 0.998;
-  const priceMax = Math.max(...data.bars.map((b) => b.high)) * 1.002;
+  const priceMin = Math.min(...chartRows.map((b) => b.low)) * 0.998;
+  const priceMax = Math.max(...chartRows.map((b) => b.high)) * 1.002;
 
   const up = data.momentum_weekly_pct >= 0;
 
@@ -185,6 +235,19 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
         </div>
         <div className="flex items-center gap-2">
           {error && <span className="text-xs text-amber-500">mock data</span>}
+          {viewWindow && (
+            <button
+              onClick={resetZoom}
+              className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 transition-colors px-2 py-1 rounded border border-zinc-200 bg-white"
+            >
+              <ZoomOut className="w-3 h-3" /> Reset zoom
+            </button>
+          )}
+          {!viewWindow && (
+            <span className="text-[11px] text-zinc-300 flex items-center gap-1">
+              <ZoomIn className="w-3 h-3" /> drag to zoom
+            </span>
+          )}
           <button onClick={load} disabled={loading} className="text-zinc-400 hover:text-zinc-700 transition-colors disabled:opacity-40">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -192,7 +255,7 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
             {PERIODS.map((p) => (
               <button
                 key={p}
-                onClick={() => setPeriod(p)}
+                onClick={() => { setPeriod(p); setViewWindow(null); }}
                 className={`px-2 py-1 text-xs rounded transition-colors ${
                   p === period
                     ? "bg-white text-zinc-900 font-medium shadow-sm"
@@ -207,9 +270,15 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
       </div>
 
       {/* Price chart */}
-      <div className="h-56" style={{ minHeight: 224 }}>
-        <ResponsiveContainer width="100%" height={224}>
-          <ComposedChart data={chartRows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+      <div className="h-64" style={{ minHeight: 256 }}>
+        <ResponsiveContainer width="100%" height={256}>
+          <ComposedChart
+            data={chartRows}
+            margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+          >
             <CartesianGrid strokeDasharray="2 4" stroke="#f4f4f5" vertical={false} />
             <XAxis
               dataKey="date"
@@ -229,6 +298,17 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
             />
             <YAxis yAxisId="vol" orientation="right" hide />
             <Tooltip content={<ChartTooltip />} />
+            {/* Drag-select zoom region */}
+            {zoomLeft && zoomRight && (
+              <ReferenceArea
+                yAxisId="price"
+                x1={zoomLeft}
+                x2={zoomRight}
+                strokeOpacity={0.3}
+                fill="#a1a1aa"
+                fillOpacity={0.2}
+              />
+            )}
             {/* Volume bars — muted, behind price */}
             <Bar yAxisId="vol" dataKey="volume" fill="#e4e4e7" opacity={0.5} radius={[1, 1, 0, 0]} isAnimationActive={false} />
             {/* Candlestick high-low wicks: thin range bars */}
@@ -291,6 +371,15 @@ export default function MarketChart({ commodity, useMock = false }: Props) {
                 value === "close" ? "Price" : value === "sma20" ? "SMA 20" : value === "sma50" ? "SMA 50" : value
               }
               iconType="plainline"
+            />
+            {/* Brush scrubber — drag handles to pan/zoom the visible window */}
+            <Brush
+              dataKey="date"
+              height={20}
+              stroke="#e4e4e7"
+              fill="#fafafa"
+              travellerWidth={6}
+              tickFormatter={() => ""}
             />
           </ComposedChart>
         </ResponsiveContainer>

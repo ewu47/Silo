@@ -16,9 +16,11 @@ import {
   Star,
   ExternalLink,
   RefreshCw,
+  MapPin,
+  Search,
 } from "lucide-react";
 import {
-  BarChart,
+  ComposedChart,
   Bar,
   XAxis,
   YAxis,
@@ -26,6 +28,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ErrorBar,
+  Cell,
 } from "recharts";
 
 import { Button } from "@/components/ui/button";
@@ -40,8 +44,10 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import MarketChart from "@/components/MarketChart";
-import { analyze, MOCK_RESPONSE, fetchMarketContext, MOCK_MARKET } from "@/lib/api";
+import { analyze, MOCK_RESPONSE, fetchMarketContext, MOCK_MARKET, fetchNearbyElevators } from "@/lib/api";
+import type { NearbyElevator } from "@/lib/api";
 import type { AnalyzeResponse, MPI, Confidence, WeatherRisk, MarketContextResponse } from "@/lib/types";
+import MethodologyTab from "@/components/MethodologyTab";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -121,7 +127,7 @@ const fmtPct = (n: number, showSign = false) =>
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+    <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5">
       {children}
     </p>
   );
@@ -183,7 +189,7 @@ function MarketTab({ useMock }: { useMock: boolean }) {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="p-5 space-y-5 max-w-5xl">
+    <div className="p-5 space-y-5 w-full">
       {/* Quick quote tiles */}
       <div>
         <SectionLabel>Futures quotes</SectionLabel>
@@ -289,6 +295,110 @@ function MarketTab({ useMock }: { useMock: boolean }) {
   );
 }
 
+// ── Scenario comparison chart ─────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ScenarioTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload;
+  if (!d) return null;
+  return (
+    <div className="bg-white border border-zinc-200 rounded-lg shadow-sm p-3 text-xs space-y-1 min-w-[170px]">
+      <p className="font-semibold text-zinc-700 text-sm">{d.label}</p>
+      <p className="text-zinc-400">Range: <span className="text-zinc-700 font-medium">{fmt(d.low)} – {fmt(d.high)}</span></p>
+      <p className="text-zinc-400">Expected: <span className="text-zinc-900 font-semibold">{fmt(d.ev)}</span></p>
+      <p className="text-zinc-400">EV/bu: <span className="text-zinc-700">{fmtBu(d.ev_per_bu)}</span></p>
+      {d.recommended && <p className="text-amber-500 font-medium">★ Recommended</p>}
+    </div>
+  );
+}
+
+function ScenarioChart({
+  scenarios,
+  recommended,
+}: {
+  scenarios: import("@/lib/types").ScenarioResult[];
+  recommended: import("@/lib/types").ScenarioResult | undefined;
+}) {
+  // One dot per scenario: show EV as the bar, range as error bars
+  const data = scenarios.map((s) => ({
+    label: s.label.replace("Sell Now — ", ""),
+    ev: s.expected_value,
+    ev_per_bu: s.ev_per_bu,
+    low: s.low,
+    high: s.high,
+    recommended: s.recommended,
+    isSellNow: s.action === "sell_now",
+    // ErrorBar expects [below, above] from the center value
+    range: [s.expected_value - s.low, s.high - s.expected_value] as [number, number],
+  }));
+
+  // Tight Y-axis: pad just 2% above/below the full low-high spread
+  const allLows = data.map((d) => d.low);
+  const allHighs = data.map((d) => d.high);
+  const yMin = Math.min(...allLows);
+  const yMax = Math.max(...allHighs);
+  const pad = (yMax - yMin) * 0.08;
+  const domain: [number, number] = [Math.floor(yMin - pad), Math.ceil(yMax + pad)];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5">
+      <div className="flex items-center justify-between mb-3">
+        <SectionLabel>Expected value by scenario</SectionLabel>
+        <div className="flex items-center gap-3 text-xs text-zinc-400">
+          <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-zinc-900" /> EV</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-0.5 h-3 bg-zinc-300" /> Range</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-amber-400" style={{ borderTop: "2px dashed #f59e0b" }} /> Recommended</span>
+        </div>
+      </div>
+      <div style={{ height: 240 }}>
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={data} margin={{ top: 12, right: 16, left: 0, bottom: 4 }} barCategoryGap="30%">
+            <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 10, fill: "#a1a1aa" }}
+              axisLine={false}
+              tickLine={false}
+              interval={0}
+            />
+            <YAxis
+              domain={domain}
+              tick={{ fontSize: 10, fill: "#a1a1aa" }}
+              tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+              axisLine={false}
+              tickLine={false}
+              width={44}
+            />
+            <Tooltip content={<ScenarioTooltip />} cursor={{ fill: "#f9fafb" }} />
+            {recommended && (
+              <ReferenceLine
+                y={recommended.expected_value}
+                stroke="#f59e0b"
+                strokeDasharray="4 2"
+                strokeWidth={1.5}
+                label={{ value: "Best", position: "right", fontSize: 10, fill: "#f59e0b" }}
+              />
+            )}
+            <Bar dataKey="ev" radius={[3, 3, 0, 0]} maxBarSize={52}>
+              {data.map((d, i) => (
+                <Cell
+                  key={i}
+                  fill={d.recommended ? "#18181b" : d.isSellNow ? "#71717a" : "#a1a1aa"}
+                />
+              ))}
+              <ErrorBar dataKey="range" width={4} strokeWidth={1.5} stroke="#71717a" direction="y" />
+            </Bar>
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="text-xs text-zinc-400 mt-2">
+        Bars show expected value. Whiskers show low–high range (1.5σ). Darker = higher priority.
+      </p>
+    </div>
+  );
+}
+
 // ── Analysis results panel ────────────────────────────────────────────────────
 
 function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: () => void }) {
@@ -296,15 +406,8 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
   const sellNowScenarios = result.scenarios.filter((s) => s.action === "sell_now");
   const waitScenarios = result.scenarios.filter((s) => s.action !== "sell_now");
 
-  const chartData = result.scenarios.map((s) => ({
-    name: s.label.replace("Sell Now — ", "").replace(" — ", "\n"),
-    Low: Math.round(s.low),
-    Expected: Math.round(s.expected_value),
-    High: Math.round(s.high),
-  }));
-
   return (
-    <div className="p-5 space-y-5 max-w-5xl">
+    <div className="p-5 space-y-5 w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -523,30 +626,8 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
         </div>
       </div>
 
-      {/* Scenario bar chart */}
-      <div className="rounded-lg border border-zinc-200 bg-white p-5">
-        <SectionLabel>Scenario range</SectionLabel>
-        <div className="h-52" style={{ minHeight: 208 }}>
-          <ResponsiveContainer width="100%" height={208}>
-            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} barGap={2}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#a1a1aa" }} axisLine={false} tickLine={false} interval={0} />
-              <YAxis tick={{ fontSize: 11, fill: "#a1a1aa" }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={40} />
-              <Tooltip
-                formatter={(value) => [typeof value === "number" ? fmt(value) : String(value)]}
-                contentStyle={{ borderRadius: 6, border: "1px solid #e4e4e7", fontSize: 13 }}
-                cursor={{ fill: "#f9f9f9" }}
-              />
-              {recommended && (
-                <ReferenceLine y={recommended.expected_value} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1} />
-              )}
-              <Bar dataKey="Low" fill="#d4d4d8" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Expected" fill="#18181b" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="High" fill="#a1a1aa" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      {/* Scenario comparison chart — zoomed to show real differences */}
+      <ScenarioChart scenarios={result.scenarios} recommended={recommended} />
 
       {/* Storage analysis */}
       {result.storage_analysis && (
@@ -582,7 +663,7 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
 
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
-type Tab = "market" | "analysis";
+type Tab = "market" | "analysis" | "methodology";
 
 export default function Dashboard() {
   const [tab, setTab] = useState<Tab>("market");
@@ -590,6 +671,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [useMock, setUseMock] = useState(false);
+  const [nearbyElevators, setNearbyElevators] = useState<NearbyElevator[]>([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyError, setNearbyError] = useState<string | null>(null);
 
   const {
     register,
@@ -644,11 +728,35 @@ export default function Dashboard() {
     setTab("analysis");
   }
 
+  async function lookupNearby() {
+    const addr = watch("farm_address");
+    if (!addr || addr.length < 5) {
+      setNearbyError("Enter a farm address first.");
+      return;
+    }
+    setNearbyLoading(true);
+    setNearbyError(null);
+    try {
+      const res = await fetchNearbyElevators(addr, 50);
+      setNearbyElevators(res.elevators);
+      if (res.elevators.length === 0) setNearbyError("No elevators found within 50 miles.");
+    } catch {
+      setNearbyError("Could not reach server.");
+    } finally {
+      setNearbyLoading(false);
+    }
+  }
+
+  function addNearbyAsBuyer(elev: NearbyElevator) {
+    if (fields.length >= 5) return;
+    append({ name: elev.name, bid_per_bu: "", address: elev.address });
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 48px)" }}>
       {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
-      <aside className="w-72 shrink-0 border-r border-zinc-200 bg-white overflow-y-auto">
-        <form onSubmit={handleSubmit(onSubmit)} className="p-4 space-y-4">
+      <aside className="w-80 shrink-0 border-r border-zinc-200 bg-white overflow-y-auto">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-5 space-y-4">
           {/* Farm */}
           <div className="space-y-3">
             <div>
@@ -659,7 +767,7 @@ export default function Dashboard() {
                   setValue("commodity", v as "soybeans" | "corn" | "wheat", { shouldValidate: true })
                 }
               >
-                <SelectTrigger className="h-9 text-sm">
+                <SelectTrigger className="h-10 text-sm">
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
@@ -673,13 +781,13 @@ export default function Dashboard() {
 
             <div>
               <FieldLabel>Quantity (bu)</FieldLabel>
-              <Input type="number" placeholder="10,000" className="h-9 text-sm" {...register("quantity_bu")} />
+              <Input type="number" placeholder="10,000" className="h-10 text-sm" {...register("quantity_bu")} />
               {errors.quantity_bu && <p className="text-red-500 text-xs mt-1">{errors.quantity_bu.message}</p>}
             </div>
 
             <div>
               <FieldLabel>Farm address</FieldLabel>
-              <Input placeholder="123 County Rd, Springfield, IL" className="h-9 text-sm" {...register("farm_address")} />
+              <Input placeholder="123 County Rd, Springfield, IL" className="h-10 text-sm" {...register("farm_address")} />
               {errors.farm_address && <p className="text-red-500 text-xs mt-1">{errors.farm_address.message}</p>}
             </div>
           </div>
@@ -699,11 +807,11 @@ export default function Dashboard() {
                     </button>
                   )}
                 </div>
-                <Input placeholder="Name" className="h-8 text-sm" {...register(`buyers.${idx}.name`)} />
+                <Input placeholder="Name" className="h-9 text-sm" {...register(`buyers.${idx}.name`)} />
                 {errors.buyers?.[idx]?.name && <p className="text-red-500 text-xs">{errors.buyers[idx]?.name?.message}</p>}
-                <Input type="number" step="0.01" placeholder="$/bu bid" className="h-8 text-sm" {...register(`buyers.${idx}.bid_per_bu`)} />
+                <Input type="number" step="0.01" placeholder="$/bu bid" className="h-9 text-sm" {...register(`buyers.${idx}.bid_per_bu`)} />
                 {errors.buyers?.[idx]?.bid_per_bu && <p className="text-red-500 text-xs">{errors.buyers[idx]?.bid_per_bu?.message}</p>}
-                <Input placeholder="Address" className="h-8 text-sm" {...register(`buyers.${idx}.address`)} />
+                <Input placeholder="Address" className="h-9 text-sm" {...register(`buyers.${idx}.address`)} />
                 {errors.buyers?.[idx]?.address && <p className="text-red-500 text-xs">{errors.buyers[idx]?.address?.message}</p>}
               </div>
             ))}
@@ -716,6 +824,54 @@ export default function Dashboard() {
                 <Plus className="w-3.5 h-3.5" /> Add buyer
               </button>
             )}
+
+            {/* Nearby elevator lookup */}
+            <div className="pt-1 space-y-2">
+              <button
+                type="button"
+                onClick={lookupNearby}
+                disabled={nearbyLoading}
+                className="w-full py-2 rounded-md border border-zinc-200 bg-zinc-50 text-sm text-zinc-600 hover:bg-zinc-100 hover:border-zinc-300 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {nearbyLoading
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Search className="w-3.5 h-3.5" />}
+                Find nearby elevators
+              </button>
+
+              {nearbyError && (
+                <p className="text-xs text-amber-600">{nearbyError}</p>
+              )}
+
+              {nearbyElevators.length > 0 && (
+                <div className="rounded-md border border-zinc-100 divide-y divide-zinc-50 max-h-52 overflow-y-auto">
+                  {nearbyElevators.map((e) => {
+                    const alreadyAdded = fields.some(
+                      (f) => (f as { name: string }).name === e.name
+                    );
+                    return (
+                      <div key={e.name} className="flex items-center justify-between px-3 py-2.5 gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-zinc-700 truncate">{e.name}</p>
+                          <p className="text-[11px] text-zinc-400 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 shrink-0" />
+                            {e.distance_miles} mi
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addNearbyAsBuyer(e)}
+                          disabled={alreadyAdded || fields.length >= 5}
+                          className="shrink-0 text-[11px] font-medium px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                        >
+                          {alreadyAdded ? "Added" : "+ Add"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           <Separator className="bg-zinc-100" />
@@ -743,7 +899,7 @@ export default function Dashboard() {
                 <div>
                   <FieldLabel>Storage type</FieldLabel>
                   <Select value={storageType} onValueChange={(v) => setValue("storage_type", v as "on_farm" | "commercial")}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="on_farm">On-farm</SelectItem>
                       <SelectItem value="commercial">Commercial</SelectItem>
@@ -764,7 +920,7 @@ export default function Dashboard() {
             <div>
               <FieldLabel>Urgency</FieldLabel>
               <Select value={urgency ?? ""} onValueChange={(v) => setValue("urgency", v as "low" | "medium" | "high", { shouldValidate: true })}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="low">Low — can wait</SelectItem>
                   <SelectItem value="medium">Medium — weeks</SelectItem>
@@ -803,7 +959,11 @@ export default function Dashboard() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Tab bar */}
         <div className="border-b border-zinc-200 bg-white px-5 flex items-center gap-1 h-10 shrink-0">
-          {([["market", "Market"] as const, ["analysis", "Analysis"] as const]).map(([t, label]) => (
+          {([
+            ["market", "Market"] as const,
+            ["analysis", "Analysis"] as const,
+            ["methodology", "Methodology"] as const,
+          ]).map(([t, label]) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -834,6 +994,7 @@ export default function Dashboard() {
                 </div>
               )
           )}
+          {tab === "methodology" && <MethodologyTab />}
         </div>
       </div>
     </div>
