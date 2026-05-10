@@ -36,13 +36,14 @@ def calc_storage_analysis(
     n_months = storage_months
     n_weeks  = n_months * 4
 
-    # Expected future price = current futures × (1 + seasonal compound return)
-    # Uses seasonal_4w for 1 month; scales linearly for longer horizons
-    # (Uses 4-week seasonal as the best monthly proxy we have from yfinance)
-    seasonal_compound = features.seasonal_4w_return * (n_months / 1.0)
-    # Capped: seasonal extrapolation loses reliability beyond 3 months
+    # Expected future price = current futures × (1 + monthly_return)^n_months
+    # seasonal_4w_return is the 1-month compound return from yfinance seasonal history.
+    # Extrapolation reliability degrades beyond 3 months, so we cap the base return.
+    monthly_return = features.seasonal_4w_return
     if n_months > 3:
-        seasonal_compound = seasonal_compound * (3.0 / n_months)
+        # Dampen the base rate proportionally past 3 months
+        monthly_return = monthly_return * (3.0 / n_months)
+    seasonal_compound = (1 + monthly_return) ** n_months - 1
 
     e_price_future = features.futures_price * (1 + seasonal_compound) + features.basis_regional
 

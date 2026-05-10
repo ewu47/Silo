@@ -81,7 +81,11 @@ def get_seasonal_returns(commodity: str, start_week: int, n_weeks: int) -> tuple
         changes = [seasonal.get(w, 0.0) for w in weeks]
         compound = float(np.prod([1 + c for c in changes]) - 1)
 
-        std = float(h.groupby("week")["pct"].std().reindex(weeks).mean())
-        return compound, std if not np.isnan(std) else 0.02
+        weekly_std = float(h.groupby("week")["pct"].std().reindex(weeks).mean())
+        if np.isnan(weekly_std):
+            weekly_std = 0.02
+        # Std of compound return over n_weeks scales as sqrt(n) × weekly_std
+        std = weekly_std * np.sqrt(n_weeks)
+        return compound, std
     except Exception:
         return 0.0, 0.02

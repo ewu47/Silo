@@ -13,6 +13,7 @@ from backend.fetchers.futures import get_futures_features, get_seasonal_returns
 from backend.fetchers.fred import get_diesel_price, get_tbill_rate
 from backend.fetchers.weather import get_weather_data
 from backend.fetchers.usda import get_basis_estimate
+from backend.fetchers.location import get_state_abbr
 from backend.constants import FALLBACK_BASIS, BASIS_STD
 
 
@@ -60,6 +61,9 @@ def build_features(commodity: str, farm_address: str) -> FeatureSet:
     """
     current_week = date.today().isocalendar().week
 
+    # Resolve farm state once — used to route regional diesel and USDA basis calls
+    state = get_state_abbr(farm_address)
+
     # Futures: price + momentum + volatility (single yfinance call)
     fut = get_futures_features(commodity)
 
@@ -67,15 +71,15 @@ def build_features(commodity: str, farm_address: str) -> FeatureSet:
     s1_ret, s1_std = get_seasonal_returns(commodity, current_week, 1)
     s4_ret, s4_std = get_seasonal_returns(commodity, current_week, 4)
 
-    # Economic
-    diesel = get_diesel_price()
+    # Economic — diesel uses PADD regional price for the farm's state
+    diesel = get_diesel_price(state)
     tbill  = get_tbill_rate()
 
     # Weather
     wx = get_weather_data(farm_address)
 
-    # Regional basis (USDA → fallback to historical average)
-    basis = get_basis_estimate(commodity, fut["price"])
+    # Regional basis — uses state-specific USDA report when available
+    basis = get_basis_estimate(commodity, fut["price"], state)
     b_std = BASIS_STD.get(commodity, 0.18)
 
     # Inventory signal: inferred from basis deviation from historical norm

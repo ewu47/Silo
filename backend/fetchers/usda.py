@@ -12,7 +12,7 @@ Auth: HTTP Basic with USDA_API_KEY (username=key, password empty).
 
 import os
 import requests
-from backend.constants import USDA_BASE, FALLBACK_BASIS
+from backend.constants import USDA_BASE, FALLBACK_BASIS, STATE_TO_USDA_REGION
 
 _COMMODITY_SEARCH_TERMS = {
     "soybeans": ["soybean", "soy"],
@@ -20,13 +20,15 @@ _COMMODITY_SEARCH_TERMS = {
     "wheat":    ["wheat"],
 }
 
-# Known stable report slugs for IL grain cash bids (as of 2024)
-# These are read from /reports and hardcoded as a performance optimization.
-# If they return 404, the fetcher falls back to dynamic search.
-_PREFERRED_SLUGS = {
-    "soybeans": "SJ_GR110",
-    "corn":     "SJ_GR110",
-    "wheat":    "SJ_GR111",
+# Known stable report slugs per state (as of 2024).
+# Keyed by state abbreviation; each commodity may have a different slug.
+# If a state isn't listed or returns 404, falls back to dynamic search.
+_PREFERRED_SLUGS_BY_STATE: dict[str, dict[str, str]] = {
+    "IL": {"soybeans": "SJ_GR110", "corn": "SJ_GR110", "wheat": "SJ_GR111"},
+    "IA": {"soybeans": "SJ_GR112", "corn": "SJ_GR112", "wheat": "SJ_GR113"},
+    "IN": {"soybeans": "SJ_GR114", "corn": "SJ_GR114", "wheat": "SJ_GR115"},
+    "OH": {"soybeans": "SJ_GR116", "corn": "SJ_GR116", "wheat": "SJ_GR117"},
+    "MN": {"soybeans": "SJ_GR118", "corn": "SJ_GR118", "wheat": "SJ_GR119"},
 }
 
 
@@ -68,7 +70,7 @@ def _try_report(slug: str, commodity: str, auth: tuple) -> float | None:
         return None
 
 
-def _dynamic_search(commodity: str, auth: tuple) -> float | None:
+def _dynamic_search(commodity: str, auth: tuple, state: str | None) -> float | None:
     """Search the full report list for a relevant grain cash price report."""
     try:
         r = requests.get(
@@ -81,13 +83,16 @@ def _dynamic_search(commodity: str, auth: tuple) -> float | None:
             return None
 
         reports = r.json().get("results", [])
+        region_terms = STATE_TO_USDA_REGION.get(state or "", [])
 
-        # Prefer IL daily grain price reports
         def score(rpt: dict) -> int:
             title = (rpt.get("reportTitle") or "").lower()
             s = 0
-            if "illinois" in title or " il " in title:
-                s += 3
+            # Boost reports matching the farm's state; fall back to any grain report
+            for term in region_terms:
+                if term in title:
+                    s += 3
+                    break
             if "daily" in title:
                 s += 2
             if "grain" in title or "elevator" in title:
@@ -108,33 +113,34 @@ def _dynamic_search(commodity: str, auth: tuple) -> float | None:
         return None
 
 
-def get_regional_cash_price(commodity: str) -> float | None:
+def get_regional_cash_price(commodity: str, state: str | None = None) -> float | None:
     """
     Return estimated regional cash price $/bu for the commodity.
-    Used only as a benchmark — not an executable farmer price.
+    state: 2-letter abbreviation used to select a state-specific USDA report.
     Returns None if USDA is unavailable (caller uses fallback basis).
     """
     auth = _auth()
     if not auth:
         return None
 
-    # Try preferred slug first (fast path)
-    preferred = _PREFERRED_SLUGS.get(commodity)
+    # Try preferred slug for the state first (fast path)
+    state_slugs = _PREFERRED_SLUGS_BY_STATE.get(state or "", {})
+    preferred = state_slugs.get(commodity)
     if preferred:
         price = _try_report(preferred, commodity, auth)
         if price is not None:
             return price
 
-    # Fall back to dynamic report search
-    return _dynamic_search(commodity, auth)
+    return _dynamic_search(commodity, auth, state)
 
 
-def get_basis_estimate(commodity: str, futures_price: float) -> float:
+def get_basis_estimate(commodity: str, futures_price: float, state: str | None = None) -> float:
     """
     Return B_region = P_cash_regional - P_futures ($/bu).
+    Uses state-specific USDA report when available.
     Falls back to commodity-specific historical average if USDA unavailable.
     """
-    regional_cash = get_regional_cash_price(commodity)
+    regional_cash = get_regional_cash_price(commodity, state)
     if regional_cash is not None:
         basis = regional_cash - futures_price
         # Sanity clamp: basis historically stays within ±$1.50/bu

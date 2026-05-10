@@ -1,7 +1,10 @@
 import os
 import requests
-from backend.constants import FRED_BASE, FRED_DIESEL_SERIES, FRED_TBILL_SERIES
-from backend.constants import FALLBACK_DIESEL, FALLBACK_TBILL_RATE
+from backend.constants import (
+    FRED_BASE, FRED_DIESEL_SERIES, FRED_TBILL_SERIES,
+    FRED_DIESEL_BY_PADD, STATE_TO_PADD,
+    FALLBACK_DIESEL, FALLBACK_TBILL_RATE,
+)
 
 
 def _fetch_series(series_id: str) -> float | None:
@@ -21,7 +24,19 @@ def _fetch_series(series_id: str) -> float | None:
         return None
 
 
-def get_diesel_price() -> float:
+def get_diesel_price(state: str | None = None) -> float:
+    """
+    Return diesel $/gal. If a US state abbreviation is provided, fetches the
+    PADD regional price from FRED (e.g. PADD 2 = Midwest). Falls back to the
+    national average series, then to the static fallback.
+    """
+    if state:
+        padd = STATE_TO_PADD.get(state.upper())
+        if padd:
+            series = FRED_DIESEL_BY_PADD[padd]
+            price = _fetch_series(series)
+            if price is not None:
+                return price
     return _fetch_series(FRED_DIESEL_SERIES) or FALLBACK_DIESEL
 
 

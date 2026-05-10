@@ -33,9 +33,9 @@ def _normalize_momentum(momentum_weekly_pct: float) -> float:
 def _normalize_inventory(inventory_signal: float) -> float:
     """
     inventory_signal is already on [-1, +1] from features.py.
-    Tight supply (negative) → bullish (+1); loose supply → bearish (-1).
+    Positive = tight supply (bullish); negative = loose supply (bearish).
     """
-    return -inventory_signal  # invert: basis below norm (loose) = bearish
+    return inventory_signal
 
 
 def _normalize_basis(basis_regional: float, commodity: str) -> float:

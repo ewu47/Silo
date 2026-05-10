@@ -180,7 +180,8 @@ def calc_scenarios(
             storage_months=storage_months,
             storage_type=storage_type,
         )
-        # Confidence: hedge eliminates futures risk, only basis risk remains
+        # Confidence: hedge eliminates futures risk; only basis risk remains.
+        # Normalize basis_std ($/bu) to fractional std to match _confidence thresholds.
         hedge_std = features.basis_std / features.futures_price if features.futures_price > 0 else 0.02
         scenarios.append(ScenarioResult(
             action="store_hedge",

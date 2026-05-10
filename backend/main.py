@@ -185,10 +185,12 @@ def analyze(req: AnalyzeRequest):
 
     # ── (4) Fair Price Model ───────────────────────────────────────────────────
     # P_fair = P_futures + B_region + A_season + W_weather - C_transport_ref
+    closest_distance = min(distances)
     fair_price = calc_fair_price(
         features=features,
         quantity_bu=req.quantity_bu,
         best_local_bid=best_buyer.bid_per_bu,
+        closest_buyer_distance_miles=closest_distance,
     )
 
     # ── (5) Storage Analysis ───────────────────────────────────────────────────

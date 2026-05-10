@@ -10,9 +10,10 @@
 - [x] Google Maps fallback — geopy straight-line × 1.25 road factor
 - [x] FastAPI backend — `/health`, `/market`, `/analyze`, `/history/{commodity}`, `/nearby`
 - [x] Pydantic models for all request/response shapes
-- [x] All constants centralized in `backend/constants.py`
+- [x] All constants centralized in `backend/constants.py` (includes PADD map, state→USDA region map)
 - [x] Full quantitative engine: fair_price, transport, storage, scenarios, MPI, features
-- [x] All fetchers with fallbacks: yfinance, FRED, NOAA, geopy, USDA, RSS news
+- [x] All fetchers with fallbacks: yfinance, FRED (PADD regional diesel), NOAA, geopy, USDA (state-specific), RSS news, location resolver
+- [x] Formula audit: MPI inventory inversion, seasonal std width, storage compound return, weather direction, hardcoded reference transport removed
 - [x] Next.js frontend scaffolded with shadcn/ui, Recharts, react-hook-form + Zod, framer-motion, KaTeX
 - [x] Market dashboard — live futures quotes, diesel, T-bill, weather, ag headlines
 - [x] Analyze form — crop, quantity, farm address, up to 5 buyers, storage toggle, urgency
@@ -36,6 +37,7 @@
 - [ ] Fix Google Maps key (enable billing) — geopy fallback is live but driving distance is more accurate
 - [ ] Deploy backend to Railway, frontend to Vercel — end-to-end on live URLs
 - [ ] Verify all API keys set in production env (FRED, USDA, Gemini, Google Maps)
+- [ ] Verify USDA preferred slugs for IA, IN, OH, MN — slugs in `_PREFERRED_SLUGS_BY_STATE` are estimates and need confirmation against the real `/reports` list
 
 ---
 

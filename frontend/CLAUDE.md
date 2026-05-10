@@ -18,11 +18,11 @@ src/
     └── types.ts         # TypeScript types mirroring backend Pydantic models
 ```
 
-## Pages (planned)
+## Pages
 
-- **Page 1 (current):** Market dashboard (`/market` endpoint data) — live futures, diesel, weather, news
-- **Page 2 (current):** Analysis form + results — buyer comparison, scenarios, fair price, LLM explanation
-- **Page 3 (planned):** Transparency / methodology — math behind each model, data sources, MPI weights
+- **Page 1:** Market dashboard (`/market` endpoint data) — live futures, diesel, weather, news
+- **Page 2:** Analysis form + results — buyer comparison, scenarios, fair price, LLM explanation
+- **Page 3:** Methodology — KaTeX-rendered formulas for all 4 models, animated flow/fan-in graphs (framer-motion), data sources table, disclaimer banner
 
 ## Key conventions
 

@@ -30,8 +30,8 @@ Distance is never a manual input. Google Maps Distance Matrix computes driving d
 **Nearby elevator lookup uses a static dataset + Nominatim.**
 No free live elevator-bid API exists. Static dataset of ~30 Midwest elevator locations geocoded against the farmer's address via OpenStreetMap/Nominatim (no API key). Returns elevators within 50mi, farmer still enters bids manually. Served at `GET /nearby`.
 
-**Illinois soybeans as the demo scope.**
-Corn/wheat are config swaps (different ticker + USDA region code). Other states are a region code change.
+**Regional routing, not Illinois-only.**
+Farm address is geocoded to a state on every `/analyze` call. USDA pulls state-specific cash bid reports (IL, IA, IN, OH, MN have preferred slugs; others use scored dynamic search). Diesel uses PADD regional series from FRED (no separate EIA key). Corn/wheat are commodity config swaps (different ticker).
 
 **No Zustand — local state is enough.**
 The app is a single-page form + results display. useState + react-hook-form covers it.
@@ -45,9 +45,11 @@ Live market dashboard (futures quotes, diesel, weather, ag headlines). No farmer
 
 **Backend**
 - Full quantitative engine: features, fair_price, transport, storage, scenarios, MPI
-- All fetchers with fallbacks: yfinance, FRED, NOAA, geopy, USDA, RSS news, nearby_elevators
+- All fetchers with fallbacks: yfinance, FRED, NOAA, geopy, USDA, RSS news, nearby_elevators, location
 - FastAPI endpoints: `/health`, `/market`, `/analyze`, `/history/{commodity}`, `/nearby`
 - All Pydantic models, constants centralized in `backend/constants.py`
+- **Regional data routing**: farm address geocoded to state via `fetchers/location.py`; state routes FRED PADD diesel series and USDA state-specific report selection
+- **Formula audit fixes**: MPI inventory signal inversion fixed; seasonal std widened with `sqrt(n_weeks)`; storage uses compound expected return; fair price weather always bullish; `C_transport_ref` uses actual closest-buyer distance + live diesel rate
 
 **Frontend**
 - Market dashboard, analyze form, buyer comparison, scenario cards, price history chart
@@ -70,7 +72,6 @@ Live market dashboard (futures quotes, diesel, weather, ag headlines). No farmer
 - **FRED**: confirmed working. Diesel at ~$5.64/gal, T-bill at ~3.61%.
 - **Google Maps**: `REQUEST_DENIED` — billing not enabled on current key. Fallback is geopy × 1.25.
 - **Cash bids by location**: no free programmatic source exists. Farmer inputs bid manually. USDA IL average used as regional benchmark only.
-- **Nearby elevators**: no live API exists. Static dataset of ~30 Midwest locations; geocoding via Nominatim (OpenStreetMap).
 
 ---
 

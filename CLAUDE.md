@@ -30,13 +30,14 @@ A farmer inputs their selling situation. Silo runs quantitative analysis across 
 
 **Data:**
 - **yfinance** — CBOT futures for soybeans (`ZS=F`), corn (`ZC=F`), wheat (`ZW=F`). Prices in cents/bu, divide by 100. ✓ working.
-- **USDA Market News API** (`marsapi.ams.usda.gov/services/v1.2`) — cash bid reports. Auth: HTTP Basic (API key as username, blank password). Real slug IDs must be read from `/reports` — do not guess them. ✓ working.
+- **USDA Market News API** (`marsapi.ams.usda.gov/services/v1.2`) — cash bid reports. Auth: HTTP Basic (API key as username, blank password). Real slug IDs must be read from `/reports` — do not guess them. ✓ working. State-specific: farm address is geocoded to a state, which selects preferred state slugs and boosts state-matched reports in dynamic search.
 - **NOAA NWS** (`api.weather.gov/points/{lat},{lon}`) — 7-day forecast, no key needed. ✓ working.
-- **FRED** (`api.stlouisfed.org/fred/series/observations`) — diesel (`GASDESW`) and T-bill rate (`DTB3`). ✓ working.
+- **FRED** (`api.stlouisfed.org/fred/series/observations`) — PADD regional diesel (e.g. `GASD2SW` for Midwest) and T-bill rate (`DTB3`). Farm state maps to a PADD; falls back to national `GASDESW` then static. ✓ working. No separate EIA key needed — EIA regional data is hosted on FRED.
 - **Google Maps Distance Matrix** — `REQUEST_DENIED` on current key (billing not enabled). Active fallback: geopy straight-line × 1.25 road factor.
 - **RSS/news fetcher** — feedparser pulling ag headlines (DTN, USDA, etc.) for market dashboard.
-- **Cash bid by location**: no free programmatic source exists. Farmer inputs bid manually. USDA IL average used as regional benchmark only.
+- **Cash bid by location**: no free programmatic source exists. Farmer inputs bid manually. USDA state/regional average used as benchmark.
 - **Nearby elevators**: no live API exists. `GET /nearby` geocodes the farm address via Nominatim (OpenStreetMap, no key) and filters a static dataset of ~30 Midwest elevator locations by radius (default 50mi). Farmer still enters bids manually.
+- **Location resolution**: `fetchers/location.py` geocodes farm address via Nominatim and returns a 2-letter state abbreviation. Called once per `/analyze` request; result routes both the FRED PADD diesel series and the USDA state report selection.
 
 **AI:** Google Gemini API (`gemini-2.0-flash`) — interpretation only, never price generation.
 
@@ -51,22 +52,23 @@ silo/
 ├── backend/
 │   ├── main.py              # FastAPI app + all route handlers
 │   ├── models.py            # Pydantic request/response models
-│   ├── constants.py         # All numeric constants
-│   ├── llm.py               # Claude interpretation layer
+│   ├── constants.py         # All numeric constants, PADD mappings, state→region maps
+│   ├── llm.py               # Gemini interpretation layer
 │   ├── engine/
 │   │   ├── features.py      # FeatureSet dataclass + build_features()
-│   │   ├── fair_price.py    # Fair price model
+│   │   ├── fair_price.py    # Fair price model (reference distance = closest buyer)
 │   │   ├── transport.py     # Transport cost + buyer comparison
 │   │   ├── storage.py       # Storage value + hedge EV
 │   │   ├── scenarios.py     # Decision simulation (sell/wait/store_hedge)
 │   │   └── mpi.py           # Market Pressure Index
 │   └── fetchers/
 │       ├── futures.py           # yfinance wrapper
-│       ├── fred.py              # FRED diesel + T-bill
+│       ├── fred.py              # FRED PADD regional diesel + T-bill
 │       ├── weather.py           # NOAA NWS
 │       ├── distance.py          # Google Maps / geopy fallback
-│       ├── usda.py              # USDA Market News API
+│       ├── usda.py              # USDA Market News API (state-specific report routing)
 │       ├── news.py              # RSS ag news headlines
+│       ├── location.py          # Nominatim state resolver (farm address → state abbr)
 │       └── nearby_elevators.py  # Nominatim geocode + static elevator dataset
 └── frontend/
     └── src/
@@ -85,10 +87,10 @@ silo/
 
 ### Fair Price Model
 `P_fair = P_futures + B_region + A_season + W_weather - C_transport_ref`
-- `B_region`: regional basis (cash − futures), from USDA or fallback
+- `B_region`: regional basis (cash − futures), from state-specific USDA report or fallback
 - `A_season`: seasonal timing adjustment = `P_futures × seasonal_4w_return`
-- `W_weather`: supply shock premium = `disruption_index × $0.30/bu × direction`
-- `C_transport_ref`: reference transport cost at 15-mile standard buyer
+- `W_weather`: supply shock premium = `disruption_index × $0.30/bu` (all disruption is bullish — both drought and flood reduce supply)
+- `C_transport_ref`: transport cost to the farmer's **closest buyer** (actual distance × fuel-scaled rate using regional diesel)
 - Uncertainty range: ±1σ using `sqrt(basis_std² + seasonal_std_dollars²)`
 - Mispricing: `M = (P_fair - P_local) / P_fair`
 
@@ -100,8 +102,10 @@ silo/
 
 ### Storage / EV Model
 `V_storage = E[P_future] - P_current - C_storage`
+- `E[P_future] = P_futures × (1 + monthly_seasonal_return)^n_months + B_region` (compound, not linear)
 - On-farm: `$0.015/bu/month`; commercial: `$0.040/bu/month`
 - Opportunity cost: T-bill rate on deferred cash
+- Seasonal extrapolation dampened past 3 months (reliability degrades)
 - `EV(store_hedge)`: lock futures price, hold physical grain
 
 ### Scenario Simulation
@@ -114,11 +118,11 @@ silo/
 `MPI = Σ w_i × X_i` — five signals, each normalized to [−1, +1]
 | Signal | Weight | Source |
 |---|---|---|
-| `X1` futures momentum | 0.30 | yfinance slope |
-| `X2` inventory imbalance | 0.25 | basis deviation proxy |
-| `X3` export demand | 0.10 | momentum × basis concordance |
-| `X4` basis widening | 0.20 | regional basis vs historical norm |
-| `X5` weather disruption | 0.15 | NOAA NWS disruption index |
+| `X1` futures momentum | 0.30 | yfinance 20-day linear slope |
+| `X2` inventory imbalance | 0.25 | basis deviation proxy (positive = tight supply = bullish) |
+| `X3` export demand | 0.10 | momentum × basis concordance proxy |
+| `X4` basis widening | 0.20 | state-specific regional basis vs historical norm |
+| `X5` weather disruption | 0.15 | NOAA NWS disruption index (all disruption is bullish) |
 - Thresholds: `≥ 0.15` → bullish, `≤ −0.15` → bearish, else neutral
 - Rate overlay: `tbill > 5%` → −0.10 penalty
 
