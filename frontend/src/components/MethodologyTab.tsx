@@ -11,7 +11,6 @@ import {
   BarChart2,
   Activity,
   Database,
-  AlertCircle,
   ChevronRight,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
@@ -70,9 +69,9 @@ function Term({
         <InlineMath math={tex} />
       </div>
       <div className="leading-relaxed">
-        <span className="font-medium text-zinc-700">{label}</span>
+        <span className="font-semibold text-zinc-800">{label}</span>
         <span className="text-zinc-400"> — </span>
-        <span className="text-zinc-500">{children}</span>
+        <span className="text-zinc-600">{children}</span>
       </div>
     </div>
   );
@@ -81,8 +80,8 @@ function Term({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-zinc-50 last:border-0">
-      <span className="text-sm text-zinc-500">{label}</span>
-      <span className="text-sm font-medium text-zinc-800 font-mono">{value}</span>
+      <span className="text-sm text-zinc-600">{label}</span>
+      <span className="text-sm font-semibold text-zinc-800 font-mono">{value}</span>
     </div>
   );
 }
@@ -118,12 +117,12 @@ function FlowNodeBox({ node }: { node: FlowNodeDef }) {
   return (
     <motion.div
       variants={pop}
-      className={`rounded-lg border px-3 py-2.5 text-center min-w-[96px] max-w-[130px] shrink-0 ${
+      className={`rounded-lg border px-3 py-2.5 text-center min-w-[110px] shrink-0 ${
         styles[node.variant ?? "default"]
       }`}
     >
-      <p className={`text-xs font-semibold leading-tight ${textColor}`}>{node.label}</p>
-      {node.sub && <p className="text-[10px] text-zinc-400 mt-0.5 leading-tight">{node.sub}</p>}
+      <p className={`text-xs font-semibold whitespace-nowrap leading-tight ${textColor}`}>{node.label}</p>
+      {node.sub && <p className="text-xs text-zinc-400 mt-0.5 leading-tight">{node.sub}</p>}
     </motion.div>
   );
 }
@@ -143,6 +142,7 @@ function FlowGraph({ nodes }: { nodes: FlowNodeDef[] }) {
 
   return (
     <div ref={ref} className="overflow-x-auto pb-1">
+      <div className="flex justify-center">
       <motion.div
         variants={stagger}
         initial="hidden"
@@ -156,6 +156,7 @@ function FlowGraph({ nodes }: { nodes: FlowNodeDef[] }) {
           </React.Fragment>
         ))}
       </motion.div>
+      </div>
     </div>
   );
 }
@@ -179,9 +180,10 @@ function FanInGraph({
 
   return (
     <div ref={ref} className="overflow-x-auto pb-1">
+      <div className="flex justify-center">
       <div className="flex items-center gap-3 min-w-max py-2 px-1">
         {/* Input column */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           {inputs.map((inp, i) => (
             <motion.div
               key={inp.label}
@@ -190,11 +192,8 @@ function FanInGraph({
               transition={{ delay: delay(i), duration: 0.3, ease: "easeOut" }}
               className="flex items-center gap-2"
             >
-              <div className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 min-w-[170px]">
+              <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 w-44">
                 <p className="text-xs font-medium text-zinc-700">{inp.label}</p>
-                <p className="text-[10px] text-zinc-400 font-mono">
-                  weight = {inp.weight}
-                </p>
               </div>
               <ChevronRight className="w-3 h-3 text-zinc-300 shrink-0" />
             </motion.div>
@@ -246,6 +245,7 @@ function FanInGraph({
           ))}
         </motion.div>
       </div>
+      </div>
     </div>
   );
 }
@@ -254,7 +254,7 @@ function FanInGraph({
 
 export default function MethodologyTab() {
   return (
-    <div className="p-5 max-w-4xl space-y-5">
+    <div className="p-5 space-y-5">
 
       {/* Intro banner */}
       <div className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
@@ -264,8 +264,8 @@ export default function MethodologyTab() {
           <p className="text-sm text-zinc-500 leading-relaxed">
             Silo is a <Highlight>quantitative engine</Highlight>, not a prediction tool. Every number
             you see is derived from live public market data using the formulas documented here.
-            The AI layer (Gemini 2.0 Flash) receives the engine&apos;s structured output and
-            explains it in plain English — it never generates prices or recommendations on its own.
+            The AI layer (Gemini 2.0 Flash) receives the engine's structured output and
+            explains it in plain English.
           </p>
         </div>
       </div>
@@ -274,27 +274,27 @@ export default function MethodologyTab() {
       <Section icon={<TrendingUp className="w-4 h-4" />} title="Fair Price Model">
         <p className="text-sm text-zinc-500 leading-relaxed">
           Estimates what your grain <Highlight>should be worth</Highlight> given current market
-          conditions, then compares it to your best local bid to quantify any pricing gap.
+          conditions, then compares it to your best local bid to identify pricing gaps.
         </p>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Computation pipeline
           </p>
           <FlowGraph
             nodes={[
               { id: "futures", label: "CBOT Futures", sub: "ZS=F / ZC=F / ZW=F", variant: "dim" },
-              { id: "basis",   label: "+ Regional Basis", sub: "USDA IL avg" },
+              { id: "basis",   label: "+ Regional Basis", sub: "USDA state avg" },
               { id: "season",  label: "+ Seasonal Adj.", sub: "4-week return" },
               { id: "weather", label: "+ Weather Premium", sub: "NOAA NWS" },
-              { id: "trans",   label: "− Ref. Transport", sub: "15-mile standard" },
+              { id: "trans",   label: "− Ref. Transport", sub: "closest buyer" },
               { id: "pfair",   label: "P_fair", sub: "± 1σ range", variant: "output" },
             ]}
           />
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Core formula
           </p>
           <FormulaBox>
@@ -315,12 +315,12 @@ export default function MethodologyTab() {
             for this commodity and calendar month.
           </Term>
           <Term tex="W_{\text{weather}}" label="Weather premium">
-            Drought or flood disruption scaled to $/bu. Drought is bullish (+); flood damage is
-            weakly bullish. Range: −$0.09 to +$0.30/bu.
+            Any supply disruption — drought or flood — reduces available grain and pushes prices up.
+            Scale: $0 to +$0.30/bu based on disruption index severity.
           </Term>
           <Term tex="C_{\text{transport\_ref}}" label="Ref. transport">
-            Haul cost to a standard 15-mile benchmark buyer (≈ $0.63/bu), so{" "}
-            <InlineMath math="P_{\text{fair}}" /> is expressed at-farm.
+            Haul cost to the farmer's <em>closest</em> buyer using the fuel-scaled rate. Anchors{" "}
+            <InlineMath math="P_{\text{fair}}" /> at-farm relative to the nearest available market.
           </Term>
         </div>
 
@@ -328,27 +328,27 @@ export default function MethodologyTab() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
               Mispricing &amp; revenue impact
             </p>
             <FormulaBox>
               <BlockMath math="M = \frac{P_{\text{fair}} - P_{\text{local}}}{P_{\text{fair}}}" />
               <BlockMath math="\Delta R = \bigl(P_{\text{fair}} - P_{\text{local}}\bigr) \times Q" />
             </FormulaBox>
-            <p className="text-xs text-zinc-400 mt-2">
+            <p className="text-sm text-zinc-500 mt-2">
               Positive <InlineMath math="M" /> → bid is below fair value.{" "}
               <InlineMath math="\Delta R" /> is the total dollar gap on your lot.
             </p>
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
               Uncertainty range (1σ)
             </p>
             <FormulaBox>
               <BlockMath math="\sigma = \sqrt{\sigma_{\text{basis}}^2 + \bigl(P_f \cdot \sigma_{\text{seasonal}}\bigr)^2}" />
               <BlockMath math="P_{\text{fair}}^{\pm} = P_{\text{fair}} \pm \sigma" />
             </FormulaBox>
-            <p className="text-xs text-zinc-400 mt-2">
+            <p className="text-sm text-zinc-500 mt-2">
               <Highlight>Wider band = higher market uncertainty.</Highlight> Derived from historical
               basis volatility and seasonal return std dev.
             </p>
@@ -366,7 +366,7 @@ export default function MethodologyTab() {
         </p>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Computation pipeline
           </p>
           <FlowGraph
@@ -381,13 +381,13 @@ export default function MethodologyTab() {
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Cost formula
           </p>
           <FormulaBox>
             <BlockMath math="C_{\text{transport}} = d \times \!\underbrace{\left(0.030 + 0.012 \times \frac{d_{\text{diesel}}}{3.80}\right)}_{\text{rate \$/bu/mile}}\! \times Q" />
           </FormulaBox>
-          <p className="text-xs text-zinc-400 mt-2">
+          <p className="text-sm text-zinc-500 mt-2">
             At reference diesel ($3.80/gal) the effective rate is{" "}
             <Highlight>$0.042 /bu/mile</Highlight> — the industry benchmark. At $5.40/gal: ≈ $0.047/bu/mile.
           </p>
@@ -395,11 +395,10 @@ export default function MethodologyTab() {
 
         <div className="space-y-3">
           <Term tex="d" label="Distance">
-            Driving miles via Google Maps Distance Matrix. Fallback: straight-line geodesic × 1.25
-            road-factor via geopy.
+            Driving miles computed from farm and buyer addresses.
           </Term>
           <Term tex="d_{\text{diesel}}" label="Live diesel">
-            Weekly U.S. retail diesel price from FRED series GASDESW. Updated in every request.
+            Regional diesel price from FRED — PADD region matched to the farm's state (e.g. GASD2SW for Midwest). Falls back to national GASDESW. Updated every request.
           </Term>
           <Term tex="Q" label="Quantity">Your total bushels. Haul cost scales linearly.</Term>
         </div>
@@ -407,13 +406,13 @@ export default function MethodologyTab() {
         <Separator className="bg-zinc-100" />
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Transport arbitrage
           </p>
           <FormulaBox>
             <BlockMath math="V_{\text{transport}} = \text{net}_{\text{this buyer}} - \text{net}_{\text{nearest buyer}}" />
           </FormulaBox>
-          <p className="text-xs text-zinc-400 mt-2">
+          <p className="text-sm text-zinc-500 mt-2">
             Positive → driving farther is worth it. Negative → closer buyer wins after fuel.
           </p>
         </div>
@@ -428,7 +427,7 @@ export default function MethodologyTab() {
         </p>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Decision pipeline
           </p>
           <FlowGraph
@@ -444,7 +443,7 @@ export default function MethodologyTab() {
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Core formula
           </p>
           <FormulaBox>
@@ -462,8 +461,7 @@ export default function MethodologyTab() {
             (T-bill rate × deferred cash × holding months).
           </Term>
           <Term tex="\sigma" label="Price std dev">
-            Annualized volatility from 20-day rolling log returns, scaled to the holding period
-            of each scenario.
+            Seasonal return standard deviation for the holding period. Wider for longer waits — uncertainty grows with time horizon.
           </Term>
         </div>
 
@@ -471,7 +469,7 @@ export default function MethodologyTab() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
               Scenarios produced
             </p>
             <div className="space-y-1.5">
@@ -479,7 +477,7 @@ export default function MethodologyTab() {
                 ["Sell Now (× buyers)", "Exact net revenue. Zero uncertainty."],
                 ["Wait 1 Week", "1-week seasonal return + 50% momentum decay."],
                 ["Wait 1 Month", "4-week horizon. Wider uncertainty band."],
-                ["Store + Hedge", "Lock futures price physically. Low risk; storage + commission costs apply."],
+                ["Store + Hedge", "Lock futures price, hold physical grain. Basis risk remains — modeled at 50% convergence to delivery. Storage + commission costs apply."],
               ] as [string, string][]).map(([name, desc]) => (
                 <div key={name} className="text-sm">
                   <span className="font-medium text-zinc-700">{name}: </span>
@@ -489,7 +487,7 @@ export default function MethodologyTab() {
             </div>
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
               Storage constants
             </p>
             <Row label="On-farm storage" value="$0.015 / bu / mo" />
@@ -509,16 +507,16 @@ export default function MethodologyTab() {
         </p>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Signal aggregation pipeline
           </p>
           <FanInGraph
             inputs={[
               { label: "X₁ — Futures momentum",    weight: "0.30" },
               { label: "X₂ — Inventory imbalance", weight: "0.25" },
-              { label: "X₃ — Export demand",       weight: "0.10" },
-              { label: "X₄ — Basis signal",        weight: "0.20" },
-              { label: "X₅ — Weather disruption",  weight: "0.15" },
+              { label: "X₃ — Basis widening",      weight: "0.20" },
+              { label: "X₄ — Weather disruption",  weight: "0.15" },
+              { label: "X₅ — Export demand",       weight: "0.10" },
             ]}
             centerTex="\sum_{i=1}^{5} w_i \cdot X_i"
             output={["Bullish", "Neutral", "Bearish"]}
@@ -526,18 +524,18 @@ export default function MethodologyTab() {
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
             Weighted sum formula
           </p>
           <FormulaBox>
-            <BlockMath math="\text{MPI} = 0.30\,X_1 + 0.25\,X_2 + 0.10\,X_3 + 0.20\,X_4 + 0.15\,X_5 \;\in\; [-1,\;+1]" />
+            <BlockMath math="\text{MPI} = 0.30\,X_1 + 0.25\,X_2 + 0.20\,X_3 + 0.15\,X_4 + 0.10\,X_5 \;\in\; [-1,\;+1]" />
           </FormulaBox>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-100 text-xs uppercase tracking-wider text-zinc-400">
+              <tr className="border-b border-zinc-100 text-xs uppercase tracking-wider text-zinc-500">
                 <th className="text-left pb-2 pr-4 font-medium">Signal</th>
                 <th className="text-left pb-2 pr-4 font-medium">Weight</th>
                 <th className="text-left pb-2 pr-4 font-medium">Source</th>
@@ -546,17 +544,17 @@ export default function MethodologyTab() {
             </thead>
             <tbody>
               {([
-                ["X₁ — Futures momentum",    "0.30", "yfinance 20-day slope",          "±2%/week maps to ±1.0"],
-                ["X₂ — Inventory imbalance", "0.25", "Basis deviation proxy",           "Inverted: tight supply = +1"],
-                ["X₃ — Export demand",       "0.10", "Momentum × basis concordance",    "Avg of X₁ and X₄ signals"],
-                ["X₄ — Basis widening",      "0.20", "USDA / FRED regional basis",      "±$0.25/bu from norm = ±1.0"],
-                ["X₅ — Weather disruption",  "0.15", "NOAA NWS 7-day forecast",         "0.0 (calm) → 1.0 (severe)"],
+                ["X₁ — Futures momentum",    "0.30", "yfinance 20-day slope",        "±2%/week maps to ±1.0"],
+                ["X₂ — Inventory imbalance", "0.25", "Basis deviation proxy",         "Inverted: tight supply = +1"],
+                ["X₃ — Basis widening",      "0.20", "USDA / FRED regional basis",    "±$0.25/bu from norm = ±1.0"],
+                ["X₄ — Weather disruption",  "0.15", "NOAA NWS 7-day forecast",       "0.0 (calm) → 1.0 (severe)"],
+                ["X₅ — Export demand",       "0.10", "Momentum × basis concordance",  "Avg of X₁ and X₃ signals"],
               ] as [string, string, string, string][]).map(([sig, w, src, norm]) => (
                 <tr key={sig} className="border-b border-zinc-50 last:border-0">
                   <td className="py-2 pr-4 font-medium text-zinc-700">{sig}</td>
-                  <td className="py-2 pr-4 font-mono font-semibold text-zinc-600">{w}</td>
-                  <td className="py-2 pr-4 text-zinc-400">{src}</td>
-                  <td className="py-2 text-zinc-400">{norm}</td>
+                  <td className="py-2 pr-4 font-mono font-semibold text-zinc-700">{w}</td>
+                  <td className="py-2 pr-4 text-zinc-600">{src}</td>
+                  <td className="py-2 text-zinc-600">{norm}</td>
                 </tr>
               ))}
             </tbody>
@@ -578,41 +576,37 @@ export default function MethodologyTab() {
           ))}
         </div>
 
-        <p className="text-xs text-zinc-400">
+        <p className="text-sm text-zinc-500">
           Rate overlay: T-bill &gt; 5% applies a −0.10 penalty (high carry cost pressures selling).
           T-bill &lt; 3% applies +0.05 (cheap money makes storage relatively affordable).
         </p>
       </Section>
 
       {/* ── Data Sources ─────────────────────────────────────────────────────── */}
-      <Section icon={<Database className="w-4 h-4" />} title="Data Sources & Fallbacks">
-        <p className="text-sm text-zinc-500">
-          Every source has a hardcoded fallback so the engine{" "}
-          <Highlight>never crashes mid-demo</Highlight>. Live data is always preferred; fallbacks
-          are logged server-side when used.
-        </p>
+      <Section icon={<Database className="w-4 h-4" />} title="Data Sources">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-100 text-xs uppercase tracking-wider text-zinc-400">
+              <tr className="border-b border-zinc-100 text-xs uppercase tracking-wider text-zinc-500">
                 <th className="text-left pb-2 pr-4 font-medium">Source</th>
                 <th className="text-left pb-2 pr-4 font-medium">Data</th>
-                <th className="text-left pb-2 font-medium">Fallback</th>
+                <th className="text-left pb-2 font-medium">Used In</th>
               </tr>
             </thead>
             <tbody>
               {([
-                ["yfinance (CBOT)",      "Corn/soy/wheat front-month futures",    "Soy $11.80, corn $4.60, wheat $5.60"],
-                ["FRED (St. Louis Fed)", "Diesel (GASDESW), T-bill (DTB3)",       "Diesel $5.40/gal, T-bill 4.0%"],
-                ["NOAA NWS",            "7-day forecast at farm lat/lon",         "Weather risk: medium, disruption: 0.05"],
-                ["USDA Market News",    "IL regional cash bid (benchmark only)",  "Historical basis by commodity"],
-                ["Google Maps",         "Driving distance farm → each buyer",     "geopy geodesic × 1.25"],
-                ["RSS ag feeds",        "DTN, USDA, Reuters headlines",           "Empty list (no crash)"],
-              ] as [string, string, string][]).map(([src, data, fallback]) => (
+                ["yfinance (CBOT)",      "Corn / soy / wheat front-month futures",                          "Fair price, scenarios, MPI"],
+                ["FRED (St. Louis Fed)", "PADD regional diesel (e.g. GASD2SW), T-bill (DTB3)",            "Transport cost, storage opportunity cost, MPI"],
+                ["NOAA NWS",            "7-day forecast at farm lat/lon",                                  "Weather premium, MPI signal"],
+                ["USDA Market News",    "State-specific cash bid (routed by farm location)",               "Regional basis in fair price model"],
+                ["Nominatim (OSM)",     "Farm address → state, lat/lon",                                   "PADD diesel routing, USDA report selection, nearby elevators"],
+                ["Google Maps / geopy", "Driving distance farm → each buyer",                              "Transport cost, buyer ranking"],
+                ["RSS ag feeds",        "DTN, USDA, Reuters headlines",                                    "Market dashboard news panel"],
+              ] as [string, string, string][]).map(([src, data, usedIn]) => (
                 <tr key={src} className="border-b border-zinc-50 last:border-0">
-                  <td className="py-2 pr-4 text-zinc-700 font-medium align-top">{src}</td>
-                  <td className="py-2 pr-4 text-zinc-500 align-top">{data}</td>
-                  <td className="py-2 text-zinc-400 align-top">{fallback}</td>
+                  <td className="py-2 pr-4 text-zinc-700 font-semibold align-top">{src}</td>
+                  <td className="py-2 pr-4 text-zinc-600 align-top">{data}</td>
+                  <td className="py-2 text-zinc-600 align-top">{usedIn}</td>
                 </tr>
               ))}
             </tbody>
@@ -620,19 +614,6 @@ export default function MethodologyTab() {
         </div>
       </Section>
 
-      {/* ── Disclaimer ───────────────────────────────────────────────────────── */}
-      <div className="flex items-start gap-3 rounded-lg border border-amber-100 bg-amber-50 p-4">
-        <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-        <div>
-          <p className="text-sm font-semibold text-amber-800 mb-0.5">Not financial advice</p>
-          <p className="text-sm text-amber-700 leading-relaxed">
-            Silo&apos;s outputs are decision-support tools, not guarantees. Commodity prices are
-            inherently unpredictable. All expected-value figures are probabilistic estimates based on
-            historical patterns and live market signals. Consult your grain merchandiser or
-            agronomist before making large sale decisions.
-          </p>
-        </div>
-      </div>
 
     </div>
   );

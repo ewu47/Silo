@@ -18,6 +18,7 @@ import {
   RefreshCw,
   MapPin,
   Search,
+  LocateFixed,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -68,7 +69,10 @@ const schema = z.object({
     .min(1, "Required")
     .transform((v) => parseInt(v, 10))
     .refine((v) => !isNaN(v) && v > 0, "Must be a positive number"),
-  farm_address: z.string().min(5, "Full address required"),
+  farm_street: z.string().min(1, "Street address required"),
+  farm_city: z.string().min(1, "City required"),
+  farm_state: z.string().min(2, "State required"),
+  farm_zip: z.string().min(5, "ZIP required"),
   buyers: z.array(buyerSchema).min(1).max(5),
   has_storage: z.boolean(),
   storage_type: z.enum(["on_farm", "commercial"]),
@@ -674,6 +678,7 @@ export default function Dashboard() {
   const [nearbyElevators, setNearbyElevators] = useState<NearbyElevator[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
 
   const {
     register,
@@ -687,7 +692,10 @@ export default function Dashboard() {
     defaultValues: {
       commodity: undefined,
       quantity_bu: "",
-      farm_address: "",
+      farm_street: "",
+      farm_city: "",
+      farm_state: "",
+      farm_zip: "",
       buyers: [{ name: "", bid_per_bu: "", address: "" }],
       has_storage: false,
       storage_type: "on_farm",
@@ -703,12 +711,19 @@ export default function Dashboard() {
   const storageType = watch("storage_type");
   const urgency = watch("urgency");
 
+  function getFarmAddress() {
+    const { farm_street, farm_city, farm_state, farm_zip } = watch();
+    return `${farm_street}, ${farm_city}, ${farm_state} ${farm_zip}`.trim();
+  }
+
   async function onSubmit(values: FormValues) {
     setLoading(true);
     setApiError(null);
+    const farm_address = `${values.farm_street}, ${values.farm_city}, ${values.farm_state} ${values.farm_zip}`.trim();
     try {
       const res = await analyze({
         ...values,
+        farm_address,
         storage_months: values.has_storage ? values.storage_months : undefined,
       });
       setResult(res);
@@ -728,8 +743,41 @@ export default function Dashboard() {
     setTab("analysis");
   }
 
+  async function findMyLocation() {
+    if (!navigator.geolocation) {
+      setNearbyError("Geolocation not supported by this browser.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords;
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            { headers: { "Accept-Language": "en" } }
+          );
+          const data = await res.json();
+          const a = data.address ?? {};
+          setValue("farm_street", `${a.house_number ?? ""} ${a.road ?? ""}`.trim());
+          setValue("farm_city", a.city ?? a.town ?? a.village ?? a.hamlet ?? "");
+          setValue("farm_state", a.state ?? "");
+          setValue("farm_zip", a.postcode ?? "");
+        } catch {
+          setNearbyError("Could not reverse-geocode location.");
+        } finally {
+          setLocating(false);
+        }
+      },
+      () => {
+        setNearbyError("Location access denied.");
+        setLocating(false);
+      }
+    );
+  }
+
   async function lookupNearby() {
-    const addr = watch("farm_address");
+    const addr = getFarmAddress();
     if (!addr || addr.length < 5) {
       setNearbyError("Enter a farm address first.");
       return;
@@ -748,7 +796,6 @@ export default function Dashboard() {
   }
 
   function addNearbyAsBuyer(elev: NearbyElevator) {
-    if (fields.length >= 5) return;
     append({ name: elev.name, bid_per_bu: "", address: elev.address });
   }
 
@@ -767,7 +814,7 @@ export default function Dashboard() {
                   setValue("commodity", v as "soybeans" | "corn" | "wheat", { shouldValidate: true })
                 }
               >
-                <SelectTrigger className="h-10 text-sm">
+                <SelectTrigger className="h-10 text-sm w-full">
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
@@ -785,10 +832,29 @@ export default function Dashboard() {
               {errors.quantity_bu && <p className="text-red-500 text-xs mt-1">{errors.quantity_bu.message}</p>}
             </div>
 
-            <div>
+            <div className="space-y-2">
               <FieldLabel>Farm address</FieldLabel>
-              <Input placeholder="123 County Rd, Springfield, IL" className="h-10 text-sm" {...register("farm_address")} />
-              {errors.farm_address && <p className="text-red-500 text-xs mt-1">{errors.farm_address.message}</p>}
+              <button
+                type="button"
+                onClick={findMyLocation}
+                disabled={locating}
+                className="w-full h-10 flex items-center justify-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 text-sm text-zinc-600 hover:bg-zinc-100 hover:border-zinc-300 transition-colors disabled:opacity-50"
+              >
+                {locating
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <LocateFixed className="w-4 h-4" />}
+                Find my location
+              </button>
+              <Input placeholder="Street address" className="h-10 text-sm" {...register("farm_street")} />
+              {errors.farm_street && <p className="text-red-500 text-xs">{errors.farm_street.message}</p>}
+              <div className="grid grid-cols-5 gap-2">
+                <Input placeholder="City" className="h-10 text-sm col-span-2" {...register("farm_city")} />
+                <Input placeholder="State" className="h-10 text-sm col-span-1" {...register("farm_state")} />
+                <Input placeholder="ZIP" className="h-10 text-sm col-span-2" {...register("farm_zip")} />
+              </div>
+              {(errors.farm_city || errors.farm_state || errors.farm_zip) && (
+                <p className="text-red-500 text-xs">City, state, and ZIP required</p>
+              )}
             </div>
           </div>
 
@@ -796,7 +862,7 @@ export default function Dashboard() {
 
           {/* Buyers */}
           <div className="space-y-2">
-            <FieldLabel>Buyers (1–5)</FieldLabel>
+            <FieldLabel>Buyers</FieldLabel>
             {fields.map((field, idx) => (
               <div key={field.id} className="rounded-md border border-zinc-100 p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -815,15 +881,13 @@ export default function Dashboard() {
                 {errors.buyers?.[idx]?.address && <p className="text-red-500 text-xs">{errors.buyers[idx]?.address?.message}</p>}
               </div>
             ))}
-            {fields.length < 5 && (
-              <button
-                type="button"
-                onClick={() => append({ name: "", bid_per_bu: "", address: "" })}
-                className="w-full py-2 border border-dashed border-zinc-200 rounded-md text-sm text-zinc-400 hover:text-zinc-700 hover:border-zinc-300 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add buyer
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => append({ name: "", bid_per_bu: "", address: "" })}
+              className="w-full py-2 border border-dashed border-zinc-200 rounded-md text-sm text-zinc-400 hover:text-zinc-700 hover:border-zinc-300 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add buyer
+            </button>
 
             {/* Nearby elevator lookup */}
             <div className="pt-1 space-y-2">
@@ -861,7 +925,7 @@ export default function Dashboard() {
                         <button
                           type="button"
                           onClick={() => addNearbyAsBuyer(e)}
-                          disabled={alreadyAdded || fields.length >= 5}
+                          disabled={alreadyAdded}
                           className="shrink-0 text-[11px] font-medium px-2 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed border-emerald-200 text-emerald-700 hover:bg-emerald-50"
                         >
                           {alreadyAdded ? "Added" : "+ Add"}
@@ -899,7 +963,9 @@ export default function Dashboard() {
                 <div>
                   <FieldLabel>Storage type</FieldLabel>
                   <Select value={storageType} onValueChange={(v) => setValue("storage_type", v as "on_farm" | "commercial")}>
-                    <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-10 text-sm w-full">
+                      <SelectValue>{storageType === "on_farm" ? "On-farm" : "Commercial"}</SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="on_farm">On-farm</SelectItem>
                       <SelectItem value="commercial">Commercial</SelectItem>
@@ -911,7 +977,15 @@ export default function Dashboard() {
                     <FieldLabel>Storage duration</FieldLabel>
                     <span className="text-sm font-semibold text-zinc-700">{storageMonths} mo</span>
                   </div>
-                  <Slider min={1} max={12} step={1} value={[storageMonths]} onValueChange={(v) => setValue("storage_months", (v as number[])[0])} />
+                  <input
+                    type="range"
+                    min={1}
+                    max={12}
+                    step={1}
+                    value={storageMonths}
+                    onChange={(e) => setValue("storage_months", Number(e.target.value))}
+                    className="w-full h-1 rounded-full appearance-none cursor-pointer bg-zinc-200 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-zinc-900 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-zinc-900 [&::-moz-range-thumb]:border-0"
+                  />
                   <div className="flex justify-between text-xs text-zinc-300 mt-1"><span>1</span><span>6</span><span>12</span></div>
                 </div>
               </>
@@ -920,7 +994,11 @@ export default function Dashboard() {
             <div>
               <FieldLabel>Urgency</FieldLabel>
               <Select value={urgency ?? ""} onValueChange={(v) => setValue("urgency", v as "low" | "medium" | "high", { shouldValidate: true })}>
-                <SelectTrigger className="h-10 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectTrigger className="h-10 text-sm w-full">
+                  <SelectValue placeholder="Select…">
+                    {urgency === "low" ? "Low — can wait" : urgency === "medium" ? "Medium — weeks" : urgency === "high" ? "High — need cash now" : ""}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="low">Low — can wait</SelectItem>
                   <SelectItem value="medium">Medium — weeks</SelectItem>
@@ -958,7 +1036,7 @@ export default function Dashboard() {
       {/* ── Right panel ──────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Tab bar */}
-        <div className="border-b border-zinc-200 bg-white px-5 flex items-center gap-1 h-10 shrink-0">
+        <div className="border-b border-zinc-200 bg-white px-5 flex items-center gap-1 h-11 shrink-0">
           {([
             ["market", "Market"] as const,
             ["analysis", "Analysis"] as const,
@@ -967,9 +1045,9 @@ export default function Dashboard() {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
+              className={`px-3 py-1.5 text-base rounded transition-colors ${
                 tab === t
-                  ? "bg-zinc-100 text-zinc-900 font-medium"
+                  ? "bg-zinc-100 text-zinc-900 font-semibold"
                   : "text-zinc-400 hover:text-zinc-700"
               }`}
             >
