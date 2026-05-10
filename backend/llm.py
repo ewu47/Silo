@@ -1,5 +1,5 @@
 """
-LLM Interpretation Layer — Anthropic Claude claude-sonnet-4-6
+LLM Interpretation Layer — Google Gemini 2.0 Flash
 
 The LLM is NOT the pricing engine. It receives structured quantitative outputs
 and translates them into plain-English explanations for grain farmers.
@@ -10,7 +10,7 @@ It interprets what the quantitative engine found.
 
 import os
 import json
-import anthropic
+from google import genai
 from backend.models import AnalyzeResponse
 
 SYSTEM_PROMPT = """You are Silo's market explanation engine. You receive structured quantitative outputs from a commodity pricing and scenario analysis model and translate them into clear, plain-English explanations for grain farmers.
@@ -29,14 +29,13 @@ Format: 2–5 plain sentences. No bullet points. No markdown. No headers."""
 
 
 def get_llm_explanation(response: AnalyzeResponse) -> str:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         return _fallback_explanation(response)
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = genai.Client(api_key=api_key)
 
-        # Build the structured payload the LLM receives
         recommended = next((s for s in response.scenarios if s.recommended), None)
         payload = {
             "commodity": response.commodity,
@@ -94,18 +93,11 @@ def get_llm_explanation(response: AnalyzeResponse) -> str:
             "recommended_action": recommended.label if recommended else None,
         }
 
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=300,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Explain this grain sale analysis to the farmer:\n\n{json.dumps(payload, indent=2)}",
-                }
-            ],
+        result = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=f"{SYSTEM_PROMPT}\n\nExplain this grain sale analysis to the farmer:\n{json.dumps(payload, indent=2)}",
         )
-        return message.content[0].text.strip()
+        return result.text.strip()
 
     except Exception:
         return _fallback_explanation(response)

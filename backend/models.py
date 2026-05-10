@@ -102,6 +102,30 @@ class MarketSignals(BaseModel):
     weather_disruption_index: float  # 0.0 to 1.0
 
 
+# ── Market context (homepage dashboard) ──────────────────────────────────────
+
+class FuturesQuote(BaseModel):
+    commodity: str
+    ticker: str
+    price: float                     # $/bu
+    momentum_weekly_pct: float       # weekly slope %
+    volatility_ann: float            # annualized std
+
+class NewsHeadline(BaseModel):
+    source: str
+    title: str
+    link: str
+    published: str
+
+class MarketContextResponse(BaseModel):
+    quotes: list[FuturesQuote]       # corn, soybeans, wheat
+    diesel_per_gal: float
+    tbill_rate_pct: float
+    weather_summary: Optional[str] = None
+    weather_risk: str
+    headlines: list[NewsHeadline]
+
+
 # ── Top-level response ────────────────────────────────────────────────────────
 
 class AnalyzeResponse(BaseModel):

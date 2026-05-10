@@ -7,5 +7,5 @@ requests
 pandas
 numpy
 python-dotenv
-anthropic
+google-genai
 geopy

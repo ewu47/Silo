@@ -4,7 +4,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.models import AnalyzeRequest, AnalyzeResponse, MarketSignals
+from backend.models import (
+    AnalyzeRequest, AnalyzeResponse, MarketSignals,
+    MarketContextResponse, FuturesQuote, NewsHeadline,
+)
 from backend.engine.features import build_features
 from backend.engine.fair_price import calc_fair_price
 from backend.engine.transport import calc_buyer_results
@@ -12,6 +15,10 @@ from backend.engine.storage import calc_storage_analysis
 from backend.engine.scenarios import calc_scenarios
 from backend.engine.mpi import calc_mpi
 from backend.fetchers.distance import get_distances
+from backend.fetchers.futures import get_futures_features
+from backend.fetchers.fred import get_diesel_price, get_tbill_rate
+from backend.fetchers.weather import get_weather_data
+from backend.fetchers.news import get_ag_headlines
 from backend.llm import get_llm_explanation
 
 app = FastAPI(title="Silo API", version="2.0.0")
@@ -27,6 +34,41 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/market", response_model=MarketContextResponse)
+def market_context(location: str = "Decatur, IL"):
+    """
+    Market context dashboard endpoint — no farmer input required.
+    Returns live futures quotes, economic indicators, weather, and ag headlines.
+    Used as the default homepage when farmers are not in harvest season.
+    """
+    commodities = ["corn", "soybeans", "wheat"]
+    quotes = []
+    for commodity in commodities:
+        fut = get_futures_features(commodity)
+        quotes.append(FuturesQuote(
+            commodity=commodity,
+            ticker=fut["ticker"],
+            price=round(fut["price"], 4),
+            momentum_weekly_pct=round(fut["momentum_weekly_pct"], 5),
+            volatility_ann=round(fut["volatility_ann"], 4),
+        ))
+
+    diesel = get_diesel_price()
+    tbill  = get_tbill_rate()
+    wx     = get_weather_data(location)
+    raw_headlines = get_ag_headlines(max_per_feed=3)
+    headlines = [NewsHeadline(**h) for h in raw_headlines]
+
+    return MarketContextResponse(
+        quotes=quotes,
+        diesel_per_gal=round(diesel, 3),
+        tbill_rate_pct=round(tbill, 2),
+        weather_summary=wx["summary"],
+        weather_risk=wx["risk_level"],
+        headlines=headlines,
+    )
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
