@@ -7,6 +7,7 @@ load_dotenv()
 from backend.models import (
     AnalyzeRequest, AnalyzeResponse, MarketSignals,
     MarketContextResponse, FuturesQuote, NewsHeadline,
+    PriceHistoryResponse, PriceBar,
 )
 from backend.engine.features import build_features
 from backend.engine.fair_price import calc_fair_price
@@ -68,6 +69,85 @@ def market_context(location: str = "Decatur, IL"):
         weather_summary=wx["summary"],
         weather_risk=wx["risk_level"],
         headlines=headlines,
+    )
+
+
+@app.get("/history/{commodity}", response_model=PriceHistoryResponse)
+def price_history(commodity: str, period: str = "6mo"):
+    """
+    Return OHLCV price history + SMAs for a commodity from yfinance.
+    commodity: "corn" | "soybeans" | "wheat"
+    period: yfinance period string — "1mo" | "3mo" | "6mo" | "1y" | "2y"
+    """
+    import numpy as np
+    import yfinance as yf
+    from backend.constants import COMMODITY_TICKERS, FALLBACK_FUTURES_CENTS
+
+    if commodity not in COMMODITY_TICKERS:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Unknown commodity: {commodity}")
+
+    ticker = COMMODITY_TICKERS[commodity]
+    valid_periods = {"1mo", "3mo", "6mo", "1y", "2y"}
+    if period not in valid_periods:
+        period = "6mo"
+
+    try:
+        h = yf.Ticker(ticker).history(period=period, interval="1d").copy()
+        if h.empty:
+            raise ValueError("empty")
+    except Exception:
+        return PriceHistoryResponse(
+            commodity=commodity, ticker=ticker, period=period,
+            bars=[], sma_20=[], sma_50=[],
+            current_price=FALLBACK_FUTURES_CENTS[commodity] / 100,
+            momentum_weekly_pct=0.0, volatility_ann=0.05,
+        )
+
+    closes = h["Close"].values / 100  # cents → dollars
+
+    # SMAs
+    def sma(arr, window):
+        result = [None] * len(arr)
+        for i in range(window - 1, len(arr)):
+            result[i] = round(float(np.mean(arr[i - window + 1: i + 1])), 4)
+        return result
+
+    sma20 = sma(closes, 20)
+    sma50 = sma(closes, 50)
+
+    bars = []
+    for i, (idx, row) in enumerate(h.iterrows()):
+        bars.append(PriceBar(
+            date=str(idx.date()),
+            open=round(float(row["Open"]) / 100, 4),
+            high=round(float(row["High"]) / 100, 4),
+            low=round(float(row["Low"]) / 100, 4),
+            close=round(float(row["Close"]) / 100, 4),
+            volume=float(row["Volume"]) if row["Volume"] > 0 else None,
+        ))
+
+    # Momentum: slope of last 20 closes, normalized to % per week
+    recent = closes[-20:] if len(closes) >= 20 else closes
+    x = np.arange(len(recent), dtype=float)
+    slope, _ = np.polyfit(x, recent, 1)
+    price = float(closes[-1])
+    momentum = float(slope * 5 / price) if price > 0 else 0.0
+
+    # Volatility: annualized std of daily log returns (last 20 days)
+    log_ret = np.diff(np.log(closes[-21:])) if len(closes) >= 2 else np.array([0.0])
+    volatility = float(np.std(log_ret) * np.sqrt(252))
+
+    return PriceHistoryResponse(
+        commodity=commodity,
+        ticker=ticker,
+        period=period,
+        bars=bars,
+        sma_20=sma20,
+        sma_50=sma50,
+        current_price=round(price, 4),
+        momentum_weekly_pct=round(momentum, 5),
+        volatility_ann=round(volatility, 4),
     )
 
 

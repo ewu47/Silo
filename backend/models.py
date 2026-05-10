@@ -102,6 +102,28 @@ class MarketSignals(BaseModel):
     weather_disruption_index: float  # 0.0 to 1.0
 
 
+# ── Price history (charting) ─────────────────────────────────────────────────
+
+class PriceBar(BaseModel):
+    date: str                          # ISO date "YYYY-MM-DD"
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: Optional[float] = None
+
+class PriceHistoryResponse(BaseModel):
+    commodity: str
+    ticker: str
+    period: str                        # e.g. "6mo"
+    bars: list[PriceBar]
+    sma_20: list[Optional[float]]      # 20-day SMA aligned to bars
+    sma_50: list[Optional[float]]      # 50-day SMA aligned to bars
+    current_price: float
+    momentum_weekly_pct: float
+    volatility_ann: float
+
+
 # ── Market context (homepage dashboard) ──────────────────────────────────────
 
 class FuturesQuote(BaseModel):
