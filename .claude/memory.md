@@ -40,8 +40,17 @@ Scopes the data calls without hardcoding logic. Corn/wheat are config swaps (tic
 
 ---
 
-## Open Questions
+## API Findings (from data_exploration.ipynb)
 
-- Which USDA endpoint actually returns reliable real-time Illinois cash bids? Needs to be confirmed during Hour 1 before anything else.
-- If USDA API is unreliable, what's the fallback source for regional cash prices?
-- Should the LLM re-prompt when a farmer clicks a specific scenario card, or explain all scenarios in one pass?
+- **USDA**: confirmed working. Auth is HTTP Basic (API key as username, blank password). `/reports` returns 1049 real reports. Slug IDs must be read from that list.
+- **yfinance**: confirmed working for `ZS=F`, `ZC=F`, `ZW=F`. Prices in cents/bu. Forward contract tickers (e.g. `ZSN26.CBT`) return no data via yfinance — front-month only.
+- **NOAA NWS**: confirmed working, no key needed.
+- **FRED**: confirmed working. Diesel at ~$5.64/gal, T-bill at ~3.61%.
+- **Google Maps**: `REQUEST_DENIED` — billing likely not enabled on current key. Fallback is geopy.
+- **Cash bids by location**: no free programmatic source exists. Farmer inputs bid manually. USDA IL average used as regional benchmark only.
+
+## Resolved Questions
+
+- ~~Which USDA endpoint returns IL cash bids?~~ — real slugs must be pulled from `/reports` list, not guessed.
+- ~~If USDA is unreliable, what's the fallback?~~ — USDA works; cash bid is a manual input anyway.
+- Should the LLM re-prompt when a farmer clicks a specific scenario card, or explain all scenarios in one pass? (still open)

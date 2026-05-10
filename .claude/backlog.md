@@ -7,10 +7,13 @@
 
 ## Before the Build Session
 
-- [ ] Confirm USDA Market News API returns real Illinois soybean cash bids — test the endpoint manually
-- [ ] Confirm yfinance returns live ZS=F futures data
-- [ ] Precompute seasonal tendency lookup (5yr historical avg price change by week-of-year for IL soybeans) — don't leave this for during the hackathon
-- [ ] Get API keys ready: Anthropic, Google Maps
+- [x] Confirm USDA Market News API works — ✓ Basic auth, real slugs from `/reports`
+- [x] Confirm yfinance returns live futures — ✓ ZS=F, ZC=F, ZW=F all working
+- [x] Confirm NOAA NWS works — ✓ no key needed
+- [x] Confirm FRED works — ✓ diesel + T-bill confirmed
+- [x] Precompute seasonal tendency — ✓ logic proven in notebook
+- [ ] Fix Google Maps key (billing) or accept geopy fallback
+- [ ] Get Anthropic API key ready
 - [ ] Scaffold monorepo: Next.js 14 + FastAPI
 
 ---
@@ -46,7 +49,7 @@
 ## P1 — Presentation Quality
 
 - [ ] Basis movement chart (cash vs. futures, 30 days)
-- [ ] Weather / drought indicator widget (NOAA)
+- [ ] Weather / drought indicator widget (NOAA NWS forecast only — no historical data needed)
 - [ ] Seasonal tendency indicator ("IL soybeans this time of year: historically +2.8% over 2 weeks")
 - [ ] MPI direction label on dashboard (Bullish / Neutral / Bearish)
 - [ ] Confidence badge on each scenario card (color-coded)
@@ -57,7 +60,7 @@
 
 ## P2 — If Time Allows
 
-- [ ] Corn support (swap ticker + USDA region, everything else stays the same)
+- [ ] ~~Corn support~~ — corn and wheat are already in scope from the start, not an add-on
 - [ ] Split strategy suggestion ("sell 50% now, store 50%")
 - [ ] Scenario deep-dive: show the full calculation breakdown for a clicked scenario
 - [ ] PDF export of the analysis
