@@ -14,9 +14,8 @@ Decision rule: if V_storage > 0, holding grain is expected to beat selling now.
 from backend.engine.features import FeatureSet
 from backend.models import StorageAnalysis
 from backend.constants import (
-    STORAGE_COST_ON_FARM,
-    STORAGE_COST_COMMERCIAL,
     HEDGE_COMMISSION_PER_BU,
+    get_storage_rate,
 )
 
 
@@ -26,6 +25,7 @@ def calc_storage_analysis(
     quantity_bu: float,
     storage_months: int,
     storage_type: str,          # "on_farm" | "commercial"
+    farm_state: str = "",
 ) -> StorageAnalysis:
     """
     Compute V_storage and whether holding grain beats selling now.
@@ -47,8 +47,8 @@ def calc_storage_analysis(
 
     e_price_future = features.futures_price * (1 + seasonal_compound) + features.basis_regional
 
-    # Physical storage rate
-    phys_rate = STORAGE_COST_ON_FARM if storage_type == "on_farm" else STORAGE_COST_COMMERCIAL
+    # Physical storage rate — regional lookup, falls back to Midwest benchmark
+    phys_rate = get_storage_rate(farm_state, storage_type)
     storage_cost_total = phys_rate * n_months
 
     # Capital / opportunity cost: interest on cash that could have been received
@@ -68,6 +68,7 @@ def calc_storage_analysis(
         opportunity_cost=round(opportunity_cost * quantity_bu, 2),
         recommend_delay=v_storage_per_bu > 0,
         storage_type=storage_type,
+        storage_rate_per_bu_mo=round(phys_rate, 4),
     )
 
 
@@ -77,6 +78,7 @@ def calc_hedge_ev(
     quantity_bu: float,
     storage_months: int,
     storage_type: str,
+    farm_state: str = "",
 ) -> dict:
     """
     Compute expected value and risk for the Store + Hedge scenario.
@@ -86,7 +88,7 @@ def calc_hedge_ev(
 
     Returns dict with ev_per_bu, cost_per_bu, risk_per_bu, low, high.
     """
-    phys_rate = STORAGE_COST_ON_FARM if storage_type == "on_farm" else STORAGE_COST_COMMERCIAL
+    phys_rate = get_storage_rate(farm_state, storage_type)
     storage_cost_per_bu = phys_rate * storage_months
 
     annual_rate = features.tbill_rate_pct / 100

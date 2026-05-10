@@ -1,11 +1,19 @@
-import type { AnalyzeRequest, AnalyzeResponse, MarketContextResponse, PriceHistoryResponse } from "./types";
+import type {
+  AnalyzeRequest, AnalyzeResponse, MarketContextResponse, PriceHistoryResponse,
+  UserProfile, SavedAnalysis, SaveAnalysisRequest,
+  BasisAlert, BasisAlertCreate, CalendarResponse,
+} from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+// ── Base helpers ──────────────────────────────────────────────────────────────
+
+async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -15,16 +23,45 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
-async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
+async function get<T>(path: string, params?: Record<string, string>, token?: string): Promise<T> {
   const url = new URL(`${API_URL}${path}`);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url.toString());
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { headers });
   if (!res.ok) {
     const text = await res.text().catch(() => "Unknown error");
     throw new Error(`API error ${res.status}: ${text}`);
   }
   return res.json();
 }
+
+async function del<T>(path: string, token: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "Unknown error");
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+async function put<T>(path: string, body: unknown, token: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "Unknown error");
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+// ── Public endpoints (no auth required) ──────────────────────────────────────
 
 export const analyze = (req: AnalyzeRequest) =>
   post<AnalyzeResponse>("/analyze", req);
@@ -34,6 +71,9 @@ export const fetchMarketContext = (location?: string) =>
 
 export const fetchPriceHistory = (commodity: string, period = "6mo") =>
   get<PriceHistoryResponse>(`/history/${commodity}`, { period });
+
+export const fetchSeasonalCalendar = (commodity: string) =>
+  get<CalendarResponse>(`/calendar/${commodity}`);
 
 export interface NearbyElevator {
   name: string;
@@ -52,6 +92,38 @@ export interface NearbyResponse {
 
 export const fetchNearbyElevators = (address: string, radius = 50) =>
   get<NearbyResponse>("/nearby", { address, radius: String(radius) });
+
+// ── Authenticated endpoints (require Supabase session token) ─────────────────
+
+export const getProfile = (token: string) =>
+  get<UserProfile>("/profile", undefined, token);
+
+export const updateProfile = (profile: UserProfile, token: string) =>
+  put<UserProfile>("/profile", profile, token);
+
+export const saveAnalysis = (req: SaveAnalysisRequest, token: string) =>
+  post<SavedAnalysis>("/analyses", req, token);
+
+export const listAnalyses = (token: string, commodity?: string, limit = 20) =>
+  get<SavedAnalysis[]>("/analyses", {
+    ...(commodity ? { commodity } : {}),
+    limit: String(limit),
+  }, token);
+
+export const deleteAnalysis = (id: string, token: string) =>
+  del<{ deleted: string }>(`/analyses/${id}`, token);
+
+export const createBasisAlert = (alert: BasisAlertCreate, token: string) =>
+  post<BasisAlert>("/alerts/basis", alert, token);
+
+export const listBasisAlerts = (token: string) =>
+  get<BasisAlert[]>("/alerts/basis", undefined, token);
+
+export const deleteBasisAlert = (id: string, token: string) =>
+  del<{ deleted: string }>(`/alerts/basis/${id}`, token);
+
+export const checkBasisAlerts = (token: string) =>
+  post<BasisAlert[]>("/alerts/basis/check", {}, token);
 
 export const MOCK_RESPONSE: AnalyzeResponse = {
   commodity: "soybeans",
@@ -223,6 +295,7 @@ export const MOCK_RESPONSE: AnalyzeResponse = {
     opportunity_cost: 420,
     recommend_delay: true,
     storage_type: "on_farm",
+    storage_rate_per_bu_mo: 0.015,
   },
   llm_explanation:
     "Market conditions mildly favor waiting. Soybean futures are trending upward (+0.31% weekly) and seasonal patterns suggest a 0.8–2.3% gain over the next 1–4 weeks. Your best immediate option is Heartland Grain Co. at $11.07/bu net — slightly offset by the longer haul. If you can absorb short-term price risk, waiting one week has the highest expected value at $111,200. The T-bill rate at 5.28% sets a meaningful hurdle for storage: you need prices to rise ~$0.048/bu/month just to break even on capital cost alone. High urgency? Sell to Heartland now.",
@@ -239,8 +312,8 @@ export const MOCK_MARKET: MarketContextResponse = {
   weather_summary: "Dry conditions in central IL. No disruption expected this week.",
   weather_risk: "low",
   headlines: [
-    { source: "DTN", title: "USDA raises soybean export forecast on strong Chinese demand", link: "#", published: "2026-05-09" },
-    { source: "Reuters", title: "Corn futures fall on favorable planting weather outlook", link: "#", published: "2026-05-09" },
-    { source: "AgWeb", title: "Wheat prices tick up on dry Plains forecast", link: "#", published: "2026-05-08" },
+    { source: "USDA Market News", title: "Texas Daily Grain Bids", link: "https://mymarketnews.ams.usda.gov/viewReport/2711", published: "2026-05-09" },
+    { source: "USDA Market News", title: "Maryland Grain Bids", link: "https://mymarketnews.ams.usda.gov/viewReport/2714", published: "2026-05-09" },
+    { source: "USDA Market News", title: "Montana Daily Elevator Grain Bids", link: "https://mymarketnews.ams.usda.gov/viewReport/2771", published: "2026-05-08" },
   ],
 };

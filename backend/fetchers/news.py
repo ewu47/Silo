@@ -1,62 +1,87 @@
 """
-Ag news headlines via RSS — no API key required.
+Ag news headlines from USDA Market News (marsapi.ams.usda.gov).
+Returns recent grain market reports with links to the real USDA report pages.
 Used by the /market dashboard endpoint.
 """
 
+import os
 import requests
-import xml.etree.ElementTree as ET
-
-# Free RSS feeds relevant to grain/commodity markets
-_FEEDS = [
-    ("DTN Ag News",   "https://www.dtnpf.com/agriculture/web/ag/news/rss"),
-    ("USDA Newsroom", "https://www.usda.gov/rss/home.xml"),
-    ("World Grain",   "https://www.world-grain.com/rss/news"),
-]
+from backend.constants import USDA_BASE
 
 _UA = {"User-Agent": "Silo/1.0 (grain-pricing-tool)"}
 
+# Public USDA Market News report viewer — slug_id is the numeric ID from the API
+_AMS_VIEWER_BASE = "https://mymarketnews.ams.usda.gov/viewReport"
 
-def _extract_link(item: ET.Element) -> str:
-    # Standard child element
-    link = item.findtext("link", "").strip()
-    if link:
-        return link
-    # Some feeds put the URL in <guid isPermaLink="true"> or just <guid>
-    guid = item.find("guid")
-    if guid is not None:
-        is_permalink = guid.attrib.get("isPermaLink", "true").lower() != "false"
-        val = (guid.text or "").strip()
-        if val and is_permalink and val.startswith("http"):
-            return val
-    # Atom-style <link href="..."/> mixed into RSS
-    for child in item:
-        if child.tag.endswith("link"):
-            href = child.attrib.get("href", "").strip() or (child.text or "").strip()
-            if href.startswith("http"):
-                return href
-    return ""
+# Search terms to pull relevant grain/oilseed reports
+_GRAIN_QUERIES = ["grain", "corn", "wheat", "soybean"]
+
+_GRAIN_KEYWORDS = {"grain", "corn", "wheat", "soybean", "oilseed", "elevator", "export", "crop"}
 
 
-def get_ag_headlines(max_per_feed: int = 3) -> list[dict]:
+def _auth() -> tuple[str, str] | None:
+    key = os.getenv("USDA_API_KEY", "")
+    return (key, "") if key else None
+
+
+def get_ag_headlines(max_total: int = 9) -> list[dict]:
     """
-    Return up to max_per_feed headlines from each feed.
+    Fetch recent USDA grain market news reports.
     Each item: {source, title, link, published}
-    Falls back to empty list if all feeds fail.
+    Returns empty list if USDA is unreachable or no key configured.
     """
-    headlines = []
-    for source, url in _FEEDS:
+    auth = _auth()
+    if not auth:
+        return []
+
+    seen_slugs: set[str] = set()
+    headlines: list[dict] = []
+
+    for query in _GRAIN_QUERIES:
+        if len(headlines) >= max_total:
+            break
         try:
-            r = requests.get(url, headers=_UA, timeout=6)
+            r = requests.get(
+                f"{USDA_BASE}/reports",
+                auth=auth,
+                params={"q": query, "sort_by": "published_date", "sort_order": "desc"},
+                timeout=8,
+            )
             if r.status_code != 200:
                 continue
-            root = ET.fromstring(r.content)
-            items = root.findall(".//item")[:max_per_feed]
-            for item in items:
-                title = item.findtext("title", "").strip()
-                link  = _extract_link(item)
-                pub   = item.findtext("pubDate", "").strip()
-                if title and link:
-                    headlines.append({"source": source, "title": title, "link": link, "published": pub})
+
+            # API returns a list directly (not wrapped in {"results": ...})
+            reports = r.json() if isinstance(r.json(), list) else r.json().get("results", [])
+
+            for report in reports[:8]:
+                if len(headlines) >= max_total:
+                    break
+
+                slug_id = str(report.get("slug_id", "")).strip()
+                if not slug_id or slug_id in seen_slugs:
+                    continue
+
+                title = (report.get("report_title") or "").strip()
+                published = (report.get("published_date") or "").strip()
+
+                if not title:
+                    continue
+
+                # Filter to grain-relevant reports
+                title_lower = title.lower()
+                if not any(kw in title_lower for kw in _GRAIN_KEYWORDS):
+                    continue
+
+                seen_slugs.add(slug_id)
+                link = f"{_AMS_VIEWER_BASE}/{slug_id}"
+
+                headlines.append({
+                    "source": "USDA Market News",
+                    "title": title,
+                    "link": link,
+                    "published": published[:10] if published else "",
+                })
         except Exception:
             continue
+
     return headlines

@@ -66,6 +66,7 @@ export interface StorageAnalysis {
   opportunity_cost: number;
   recommend_delay: boolean;
   storage_type: StorageType;
+  storage_rate_per_bu_mo: number;
 }
 
 export interface ScenarioResult {
@@ -132,6 +133,72 @@ export interface PriceHistoryResponse {
   current_price: number;
   momentum_weekly_pct: number;
   volatility_ann: number;
+}
+
+// ── User profile ─────────────────────────────────────────────────────────────
+
+export interface UserProfile {
+  farm_address?: string;
+  preferred_commodity?: Commodity;
+}
+
+// ── Saved analyses ────────────────────────────────────────────────────────────
+
+export interface SavedAnalysis {
+  id: string;
+  commodity: string;
+  quantity_bu: number;
+  farm_address?: string;
+  created_at: string;
+  response_json: AnalyzeResponse;
+}
+
+export interface SaveAnalysisRequest {
+  commodity: string;
+  quantity_bu: number;
+  farm_address?: string;
+  request_json: AnalyzeRequest;
+  response_json: AnalyzeResponse;
+}
+
+// ── Basis alerts ──────────────────────────────────────────────────────────────
+
+export interface BasisAlertCreate {
+  commodity: Commodity;
+  farm_address: string;
+  target_basis: number;
+  direction: "above" | "below";
+}
+
+export interface BasisAlert {
+  id: string;
+  commodity: string;
+  farm_address: string;
+  target_basis: number;
+  direction: "above" | "below";
+  triggered: boolean;
+  triggered_at?: string;
+  triggered_basis?: number;
+  created_at: string;
+}
+
+// ── Seasonal calendar ─────────────────────────────────────────────────────────
+
+export interface CalendarMonth {
+  month: number;
+  month_name: string;
+  avg_change_pct: number;
+  volatility_pct: number;
+  signal: "bullish" | "bearish" | "neutral";
+}
+
+export interface CalendarResponse {
+  commodity: string;
+  months: CalendarMonth[];
+  best_months: number[];
+  worst_months: number[];
+  current_month: number;
+  current_signal: "bullish" | "bearish" | "neutral";
 }
 
 // ── Market context (GET /market) ──────────────────────────────────────────────

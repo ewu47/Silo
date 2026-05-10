@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Truck,
   BarChart2,
+  Warehouse,
   Activity,
   Database,
   ChevronRight,
@@ -385,7 +386,7 @@ export default function MethodologyTab() {
             Cost formula
           </p>
           <FormulaBox>
-            <BlockMath math="C_{\text{transport}} = d \times \!\underbrace{\left(0.030 + 0.012 \times \frac{d_{\text{diesel}}}{3.80}\right)}_{\text{rate \$/bu/mile}}\! \times Q" />
+            <BlockMath math="C_{\text{transport}} = d \times \!\underbrace{\left(r_{\text{fixed}} + r_{\text{fuel}} \times \frac{d_{\text{diesel}}}{d_{\text{ref}}}\right)}_{\text{rate \$/bu/mile}}\! \times Q" />
           </FormulaBox>
           <p className="text-sm text-zinc-500 mt-2">
             At reference diesel ($3.80/gal) the effective rate is{" "}
@@ -394,8 +395,14 @@ export default function MethodologyTab() {
         </div>
 
         <div className="space-y-3">
-          <Term tex="d" label="Distance">
-            Driving miles computed from farm and buyer addresses.
+          <Term tex="r_{\text{fixed}}" label="Fixed rate component">
+            <strong>$0.030/bu/mile</strong> — hardcoded calibration constant covering driver labor, truck depreciation, and overhead. Based on industry benchmark data for Midwest grain hauling. Not live-adjusted.
+          </Term>
+          <Term tex="r_{\text{fuel}}" label="Fuel rate component">
+            <strong>$0.012/bu/mile</strong> — hardcoded fuel sensitivity coefficient. Scales the live diesel price to capture the fuel portion of haul cost. Calibrated so that at $3.80/gal reference diesel the total matches the $0.042/bu/mile industry figure.
+          </Term>
+          <Term tex="d_{\text{ref}}" label="Reference diesel">
+            <strong>$3.80/gal</strong> — hardcoded baseline. The fuel component equals zero adjustment at this price; above or below it, haul cost scales proportionally.
           </Term>
           <Term tex="d_{\text{diesel}}" label="Live diesel">
             Regional diesel price from FRED — PADD region matched to the farm's state (e.g. GASD2SW for Midwest). Falls back to national GASDESW. Updated every request.
@@ -498,6 +505,116 @@ export default function MethodologyTab() {
         </div>
       </Section>
 
+      {/* ── Storage & Hedge Model ────────────────────────────────────────────── */}
+      <Section icon={<Warehouse className="w-4 h-4" />} title="Storage &amp; Hedge Model">
+        <p className="text-sm text-zinc-500 leading-relaxed">
+          Decides whether holding grain beats selling today by computing{" "}
+          <Highlight>V_storage</Highlight> — the net expected gain from waiting, after
+          accounting for expected price appreciation, physical storage cost, and the
+          opportunity cost of deferred cash. A separate{" "}
+          <Highlight>Store + Hedge</Highlight> scenario locks in the futures price while
+          holding physical grain, eliminating futures risk but retaining basis risk.
+        </p>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            Computation pipeline
+          </p>
+          <FlowGraph
+            nodes={[
+              { id: "futures",  label: "Futures Price", sub: "CBOT front-month", variant: "dim" },
+              { id: "seasonal", label: "× Seasonal Return", sub: "compound n-month" },
+              { id: "basis",    label: "+ Regional Basis", sub: "USDA state avg" },
+              { id: "cost",     label: "− Storage Cost", sub: "regional rate" },
+              { id: "opp",      label: "− Opp. Cost", sub: "T-bill × cash" },
+              { id: "vstorage", label: "V_storage", sub: "hold vs sell", variant: "output" },
+            ]}
+          />
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            Core formula
+          </p>
+          <FormulaBox>
+            <BlockMath math="V_{\text{storage}} = \underbrace{P_f \cdot (1 + r_s)^n + B_{\text{region}}}_{\mathbb{E}[P_{\text{future}}]} - P_{\text{current}} - C_{\text{storage}} - C_{\text{opp}}" />
+          </FormulaBox>
+        </div>
+
+        <div className="space-y-3">
+          <Term tex="r_s" label="Monthly seasonal return">
+            Historical average compound return for this commodity and calendar month.
+            Dampened past 3 months: rate scales as <InlineMath math="r_s \times (3/n)" /> for <InlineMath math="n > 3" /> — reliability degrades at longer horizons.
+          </Term>
+          <Term tex="C_{\text{storage}}" label="Physical storage cost">
+            <InlineMath math="r_{\text{regional}} \times n" /> — regional $/bu/month rate (see table below) times holding months. Varies by PADD to reflect electricity, humidity conditioning, and local labor.
+          </Term>
+          <Term tex="C_{\text{opp}}" label="Opportunity cost">
+            <InlineMath math="P_{\text{current}} \times (r_{\text{tbill}} / 12) \times n" /> — interest foregone on the cash you didn&apos;t receive. Uses live T-bill rate from FRED.
+          </Term>
+        </div>
+
+        <Separator className="bg-zinc-100" />
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">
+            Regional storage rates ($/bu/month)
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-100 text-xs uppercase tracking-wider text-zinc-500">
+                  <th className="text-left pb-2 pr-4 font-medium">Region (PADD)</th>
+                  <th className="text-right pb-2 pr-4 font-medium">On-farm</th>
+                  <th className="text-right pb-2 pr-4 font-medium">Commercial</th>
+                  <th className="text-left pb-2 font-medium">Driver</th>
+                </tr>
+              </thead>
+              <tbody>
+                {([
+                  ["PADD 1 — East Coast",      "$0.018", "$0.046", "High humidity; heavy conditioning required"],
+                  ["PADD 2 — Midwest",         "$0.015", "$0.040", "Benchmark — dry-cold winters, low conditioning"],
+                  ["PADD 3 — Gulf Coast",      "$0.022", "$0.052", "Heat + humidity; significant drying costs"],
+                  ["PADD 4 — Rocky Mountain",  "$0.013", "$0.036", "Dry climate; lowest conditioning overhead"],
+                  ["PADD 5 — West Coast",      "$0.016", "$0.044", "Moderate; varies by sub-region"],
+                ] as [string, string, string, string][]).map(([region, onFarm, commercial, driver]) => (
+                  <tr key={region} className="border-b border-zinc-50 last:border-0">
+                    <td className="py-2 pr-4 font-medium text-zinc-700">{region}</td>
+                    <td className="py-2 pr-4 font-mono text-right text-zinc-700">{onFarm}</td>
+                    <td className="py-2 pr-4 font-mono text-right text-zinc-700">{commercial}</td>
+                    <td className="py-2 text-zinc-500 text-xs">{driver}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-zinc-400 mt-2">
+            Farm state is geocoded to a PADD via Nominatim. The applied rate is shown in the Storage analysis panel of each result.
+          </p>
+        </div>
+
+        <Separator className="bg-zinc-100" />
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            Store + Hedge scenario
+          </p>
+          <FormulaBox>
+            <BlockMath math="\text{EV}_{\text{hedge}} = \underbrace{P_f + B_{\text{region}} \times 0.5}_{\text{locked price}} - C_{\text{storage}} - C_{\text{opp}} - C_{\text{commission}}" />
+          </FormulaBox>
+          <p className="text-sm text-zinc-500 mt-2">
+            Selling a futures contract locks approximately today&apos;s futures price. The remaining risk is{" "}
+            <Highlight>basis risk</Highlight> — the spread between futures and cash at delivery.
+            We model expected delivery basis as 50% convergence toward zero from today&apos;s regional basis.
+            Risk band uses <InlineMath math="1.5\,\sigma_{\text{basis}}" />.
+          </p>
+          <div className="mt-3 space-y-1">
+            <Row label="Commission (round-trip)" value="$0.015 / bu  — hardcoded brokerage benchmark" />
+            <Row label="Basis convergence assumption" value="50% of current regional basis" />
+          </div>
+        </div>
+      </Section>
+
       {/* ── MPI ──────────────────────────────────────────────────────────────── */}
       <Section icon={<Activity className="w-4 h-4" />} title="Market Pressure Index (MPI)">
         <p className="text-sm text-zinc-500 leading-relaxed">
@@ -583,7 +700,7 @@ export default function MethodologyTab() {
       </Section>
 
       {/* ── Data Sources ─────────────────────────────────────────────────────── */}
-      <Section icon={<Database className="w-4 h-4" />} title="Data Sources">
+      <Section icon={<Database className="w-4 h-4" />} title="Data Sources &amp; Limitations">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -601,7 +718,7 @@ export default function MethodologyTab() {
                 ["USDA Market News",    "State-specific cash bid (routed by farm location)",               "Regional basis in fair price model"],
                 ["Nominatim (OSM)",     "Farm address → state, lat/lon",                                   "PADD diesel routing, USDA report selection, nearby elevators"],
                 ["Google Maps / geopy", "Driving distance farm → each buyer",                              "Transport cost, buyer ranking"],
-                ["RSS ag feeds",        "DTN, USDA, Reuters headlines",                                    "Market dashboard news panel"],
+                ["USDA Market News (headlines)", "Grain report titles via /reports?q=grain, real links to mymarketnews.ams.usda.gov", "Market dashboard news panel"],
               ] as [string, string, string][]).map(([src, data, usedIn]) => (
                 <tr key={src} className="border-b border-zinc-50 last:border-0">
                   <td className="py-2 pr-4 text-zinc-700 font-semibold align-top">{src}</td>

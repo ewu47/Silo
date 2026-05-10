@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from backend.auth import get_current_user
 from backend.db import get_supabase
 from backend.models import UserProfile
@@ -20,6 +20,7 @@ def get_profile(user_id: str = Depends(get_current_user)):
 
 @router.put("", response_model=UserProfile)
 def update_profile(profile: UserProfile, user_id: str = Depends(get_current_user)):
+    # Address already verified on the frontend via Nominatim dropdown selection
     db = get_supabase()
     data = {"user_id": user_id}
     if profile.farm_address is not None:

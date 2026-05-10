@@ -1,23 +1,44 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Any
 
 
 # ── Request ───────────────────────────────────────────────────────────────────
 
 class Buyer(BaseModel):
-    name: str
-    bid_per_bu: float = Field(..., gt=0, description="Cash bid in $/bu")
-    address: str
+    name: str = Field(..., min_length=1, max_length=100)
+    bid_per_bu: float = Field(..., gt=0, lt=100, description="Cash bid in $/bu")
+    address: str = Field(..., min_length=5, max_length=300)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Buyer name cannot be blank")
+        return v.strip()
+
+    @field_validator("address")
+    @classmethod
+    def address_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Buyer address cannot be blank")
+        return v.strip()
 
 class AnalyzeRequest(BaseModel):
     commodity: str = Field(..., pattern="^(soybeans|corn|wheat)$")
-    quantity_bu: float = Field(..., gt=0)
-    farm_address: str
+    quantity_bu: float = Field(..., gt=0, lt=100_000_000, description="Max 100M bushels")
+    farm_address: str = Field(..., min_length=5, max_length=300)
     buyers: list[Buyer] = Field(..., min_length=1, max_length=5)
     has_storage: bool = False
     storage_type: str = Field("commercial", pattern="^(on_farm|commercial)$")
     storage_months: Optional[int] = Field(None, ge=1, le=12)
     urgency: str = Field("medium", pattern="^(low|medium|high)$")
+
+    @field_validator("farm_address")
+    @classmethod
+    def farm_address_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Farm address cannot be blank")
+        return v.strip()
 
 
 # ── Buyer comparison ──────────────────────────────────────────────────────────
@@ -65,6 +86,7 @@ class StorageAnalysis(BaseModel):
     opportunity_cost: float          # time value of delayed cash flow
     recommend_delay: bool            # True if V_storage > 0
     storage_type: str                # "on_farm" | "commercial"
+    storage_rate_per_bu_mo: float    # regional $/bu/month rate actually applied
 
 
 # ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -172,8 +194,8 @@ class AnalyzeResponse(BaseModel):
 # ── User profile ──────────────────────────────────────────────────────────────
 
 class UserProfile(BaseModel):
-    farm_address: Optional[str] = None
-    preferred_commodity: Optional[str] = None
+    farm_address: Optional[str] = Field(None, min_length=5, max_length=300)
+    preferred_commodity: Optional[str] = Field(None, pattern="^(soybeans|corn|wheat)$")
 
 
 # ── Saved analysis history ────────────────────────────────────────────────────
@@ -191,8 +213,8 @@ class SavedAnalysis(BaseModel):
 
 class BasisAlertCreate(BaseModel):
     commodity: str = Field(..., pattern="^(soybeans|corn|wheat)$")
-    farm_address: str
-    target_basis: float
+    farm_address: str = Field(..., min_length=5, max_length=300)
+    target_basis: float = Field(..., gt=-5.0, lt=5.0, description="Basis in $/bu, realistic range -$5 to +$5")
     direction: str = Field(..., pattern="^(above|below)$")
 
 class BasisAlert(BaseModel):

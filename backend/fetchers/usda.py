@@ -86,7 +86,7 @@ def _dynamic_search(commodity: str, auth: tuple, state: str | None) -> float | N
         region_terms = STATE_TO_USDA_REGION.get(state or "", [])
 
         def score(rpt: dict) -> int:
-            title = (rpt.get("reportTitle") or "").lower()
+            title = (rpt.get("report_title") or rpt.get("reportTitle") or "").lower()
             s = 0
             # Boost reports matching the farm's state; fall back to any grain report
             for term in region_terms:

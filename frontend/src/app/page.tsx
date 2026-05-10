@@ -19,6 +19,8 @@ import {
   MapPin,
   Search,
   LocateFixed,
+  BookmarkPlus,
+  Wheat,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -45,10 +47,12 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import MarketChart from "@/components/MarketChart";
-import { analyze, MOCK_RESPONSE, fetchMarketContext, MOCK_MARKET, fetchNearbyElevators } from "@/lib/api";
+import { analyze, MOCK_RESPONSE, fetchMarketContext, MOCK_MARKET, fetchNearbyElevators, getProfile } from "@/lib/api";
 import type { NearbyElevator } from "@/lib/api";
 import type { AnalyzeResponse, MPI, Confidence, WeatherRisk, MarketContextResponse } from "@/lib/types";
 import MethodologyTab from "@/components/MethodologyTab";
+import AddressAutocomplete, { toAddressString, fromAddressString, type AddressValue } from "@/components/AddressAutocomplete";
+import { supabase } from "@/lib/supabase";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -69,10 +73,7 @@ const schema = z.object({
     .min(1, "Required")
     .transform((v) => parseInt(v, 10))
     .refine((v) => !isNaN(v) && v > 0, "Must be a positive number"),
-  farm_street: z.string().min(1, "Street address required"),
-  farm_city: z.string().min(1, "City required"),
-  farm_state: z.string().min(2, "State required"),
-  farm_zip: z.string().min(5, "ZIP required"),
+  farm_address: z.string().min(5, "Farm address required"),
   buyers: z.array(buyerSchema).min(1).max(5),
   has_storage: z.boolean(),
   storage_type: z.enum(["on_farm", "commercial"]),
@@ -174,15 +175,19 @@ const COMMODITIES = ["corn", "soybeans", "wheat"] as const;
 
 function MarketTab({ useMock }: { useMock: boolean }) {
   const [ctx, setCtx] = useState<MarketContextResponse | null>(null);
+  const [headlines, setHeadlines] = useState<MarketContextResponse["headlines"]>(MOCK_MARKET.headlines);
   const [loading, setLoading] = useState(false);
   const [activeCommodity, setActiveCommodity] = useState<string>("soybeans");
 
   const load = useCallback(async () => {
-    if (useMock) { setCtx(MOCK_MARKET); return; }
+    if (useMock) { setCtx(MOCK_MARKET); setHeadlines(MOCK_MARKET.headlines); return; }
     setLoading(true);
     try {
       const res = await fetchMarketContext();
       setCtx(res);
+      if (res.headlines.length > 0 && res.headlines.some((h) => h.link && h.link !== "#")) {
+        setHeadlines(res.headlines);
+      }
     } catch {
       setCtx(MOCK_MARKET);
     } finally {
@@ -192,13 +197,25 @@ function MarketTab({ useMock }: { useMock: boolean }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const data = ctx ?? MOCK_MARKET;
+
   return (
     <div className="p-5 space-y-5 w-full">
-      {/* Quick quote tiles */}
+      {/* Futures quotes + refresh */}
       <div>
-        <SectionLabel>Futures quotes</SectionLabel>
+        <div className="flex items-center justify-between mb-2.5">
+          <SectionLabel>Futures quotes</SectionLabel>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-700 transition-colors"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-3">
-          {(ctx ?? MOCK_MARKET).quotes.map((q) => {
+          {data.quotes.map((q) => {
             const up = q.momentum_weekly_pct >= 0;
             return (
               <button
@@ -211,10 +228,12 @@ function MarketTab({ useMock }: { useMock: boolean }) {
                 }`}
               >
                 <p className="text-xs text-zinc-400 capitalize mb-1">{q.commodity} ({q.ticker})</p>
-                <p className="text-xl font-semibold text-zinc-900">${q.price.toFixed(3)}</p>
-                <p className={`text-sm font-medium mt-1 ${up ? "text-emerald-600" : "text-red-500"}`}>
-                  {up ? "▲" : "▼"} {fmtPct(Math.abs(q.momentum_weekly_pct))}/wk
-                </p>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-xl font-semibold text-zinc-900">${q.price.toFixed(3)}</p>
+                  <p className={`text-sm font-medium ${up ? "text-emerald-600" : "text-red-500"}`}>
+                    {up ? "▲" : "▼"} {fmtPct(Math.abs(q.momentum_weekly_pct))}/wk
+                  </p>
+                </div>
                 <p className="text-xs text-zinc-400 mt-0.5">vol {fmtPct(q.volatility_ann)} ann</p>
               </button>
             );
@@ -228,73 +247,74 @@ function MarketTab({ useMock }: { useMock: boolean }) {
       </div>
 
       {/* Economic indicators + news side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <div className="lg:col-span-2 space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-stretch">
+        <div className="lg:col-span-2 flex flex-col">
           <SectionLabel>Economic indicators</SectionLabel>
-          <div className="rounded-lg border border-zinc-200 bg-white p-4 space-y-3">
+          <div className="flex-1 rounded-lg border border-zinc-200 bg-white p-4 space-y-3">
             {[
-              { label: "Diesel", value: `$${(ctx ?? MOCK_MARKET).diesel_per_gal.toFixed(2)}/gal` },
-              { label: "T-Bill (3mo)", value: `${(ctx ?? MOCK_MARKET).tbill_rate_pct.toFixed(2)}%` },
+              { label: "Diesel", value: `$${data.diesel_per_gal.toFixed(2)}/gal` },
+              { label: "T-Bill (3mo)", value: `${data.tbill_rate_pct.toFixed(2)}%` },
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center justify-between">
                 <span className="text-sm text-zinc-500">{label}</span>
                 <span className="text-sm font-semibold text-zinc-900">{value}</span>
               </div>
             ))}
-            <Separator className="bg-zinc-100" />
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm text-zinc-500">7-day weather</span>
-                <WeatherBadge risk={(ctx ?? MOCK_MARKET).weather_risk} />
-              </div>
-              {(ctx ?? MOCK_MARKET).weather_summary && (
-                <p className="text-sm text-zinc-500 leading-relaxed mt-1">
-                  {(ctx ?? MOCK_MARKET).weather_summary}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <button
-              onClick={load}
-              disabled={loading}
-              className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-700 transition-colors"
-            >
-              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-              Refresh
-            </button>
           </div>
         </div>
 
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-3 flex flex-col">
           <SectionLabel>Ag headlines</SectionLabel>
-          <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-50">
-            {(ctx ?? MOCK_MARKET).headlines.length === 0 ? (
+          <div className="flex-1 rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-50">
+            {headlines.length === 0 ? (
               <p className="p-4 text-sm text-zinc-400">No headlines available.</p>
             ) : (
-              (ctx ?? MOCK_MARKET).headlines.map((h, i) => (
-                <a
-                  key={i}
-                  href={h.link || "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-zinc-50 transition-colors group"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-zinc-800 group-hover:text-zinc-900 leading-snug">
-                      {h.title}
-                    </p>
-                    <p className="text-xs text-zinc-400 mt-0.5">
-                      {h.source} · {h.published ? h.published.slice(0, 16) : ""}
-                    </p>
+              headlines.map((h, i) => {
+                const hasLink = h.link && h.link !== "#" && !h.link.startsWith("http://localhost");
+                return hasLink ? (
+                  <a
+                    key={i}
+                    href={h.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-zinc-50 transition-colors group"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-zinc-800 group-hover:text-zinc-900 leading-snug">
+                        {h.title}
+                      </p>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {h.source} · {h.published ? h.published.slice(0, 16) : ""}
+                      </p>
+                    </div>
+                    <ExternalLink className="w-3.5 h-3.5 text-zinc-300 group-hover:text-zinc-500 shrink-0 mt-0.5" />
+                  </a>
+                ) : (
+                  <div key={i} className="flex items-start justify-between gap-3 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-800 leading-snug">{h.title}</p>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {h.source} · {h.published ? h.published.slice(0, 16) : ""}
+                      </p>
+                    </div>
                   </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-zinc-300 group-hover:text-zinc-500 shrink-0 mt-0.5" />
-                </a>
-              ))
+                );
+              })
             )}
           </div>
         </div>
       </div>
+
+      {/* 7-day weather — standalone horizontal bubble */}
+      {data.weather_summary && (
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <div className="flex items-center justify-between mb-2">
+            <SectionLabel>7-day weather outlook</SectionLabel>
+            <WeatherBadge risk={data.weather_risk} />
+          </div>
+          <p className="text-sm text-zinc-500 leading-relaxed">{data.weather_summary}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -337,13 +357,13 @@ function ScenarioChart({
     range: [s.expected_value - s.low, s.high - s.expected_value] as [number, number],
   }));
 
-  // Tight Y-axis: pad just 2% above/below the full low-high spread
-  const allLows = data.map((d) => d.low);
-  const allHighs = data.map((d) => d.high);
-  const yMin = Math.min(...allLows);
-  const yMax = Math.max(...allHighs);
-  const pad = (yMax - yMin) * 0.08;
-  const domain: [number, number] = [Math.floor(yMin - pad), Math.ceil(yMax + pad)];
+  // Tight Y-axis: zoom in around EV range (not whisker extremes) so differences are readable
+  const allEVs = data.map((d) => d.ev);
+  const evMin = Math.min(...allEVs);
+  const evMax = Math.max(...allEVs);
+  const evSpread = Math.max(evMax - evMin, 500); // min $500 spread so chart isn't flat
+  const pad = evSpread * 0.6;
+  const domain: [number, number] = [Math.floor(evMin - pad), Math.ceil(evMax + pad)];
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-5">
@@ -351,7 +371,7 @@ function ScenarioChart({
         <SectionLabel>Expected value by scenario</SectionLabel>
         <div className="flex items-center gap-3 text-xs text-zinc-400">
           <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-zinc-900" /> EV</span>
-          <span className="flex items-center gap-1"><span className="inline-block w-0.5 h-3 bg-zinc-300" /> Range</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-0.5 h-3 bg-red-400" /> Range</span>
           <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-amber-400" style={{ borderTop: "2px dashed #f59e0b" }} /> Recommended</span>
         </div>
       </div>
@@ -391,7 +411,7 @@ function ScenarioChart({
                   fill={d.recommended ? "#18181b" : d.isSellNow ? "#71717a" : "#a1a1aa"}
                 />
               ))}
-              <ErrorBar dataKey="range" width={4} strokeWidth={1.5} stroke="#71717a" direction="y" />
+              <ErrorBar dataKey="range" width={4} strokeWidth={1.5} stroke="#ef4444" direction="y" />
             </Bar>
           </ComposedChart>
         </ResponsiveContainer>
@@ -405,38 +425,57 @@ function ScenarioChart({
 
 // ── Analysis results panel ────────────────────────────────────────────────────
 
-function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: () => void }) {
+function AnalysisPanel({ result, onClear, analyzedAt }: { result: AnalyzeResponse; onClear: () => void; analyzedAt: Date }) {
   const recommended = result.scenarios.find((s) => s.recommended);
   const sellNowScenarios = result.scenarios.filter((s) => s.action === "sell_now");
   const waitScenarios = result.scenarios.filter((s) => s.action !== "sell_now");
+
+  const dateStr = analyzedAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const timeStr = analyzedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
   return (
     <div className="p-5 space-y-5 w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-zinc-900 capitalize">{result.commodity}</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold text-zinc-900 capitalize">{result.commodity}</h2>
+          <span className="text-zinc-300">|</span>
           <p className="text-sm text-zinc-400">{result.quantity_bu.toLocaleString()} bu</p>
         </div>
-        <button onClick={onClear} className="text-sm text-zinc-400 hover:text-zinc-600 transition-colors">
-          Clear
-        </button>
+        <div className="flex items-center gap-3 text-sm text-zinc-400">
+          <span>{dateStr}</span>
+          <span className="text-zinc-300">|</span>
+          <span>{timeStr}</span>
+          <span className="text-zinc-300">|</span>
+          <button onClick={onClear} className="hover:text-zinc-600 transition-colors">Clear</button>
+          <span className="text-zinc-300">|</span>
+          <button className="flex items-center gap-1 hover:text-zinc-600 transition-colors">
+            <BookmarkPlus className="w-3.5 h-3.5" /> Save
+          </button>
+        </div>
       </div>
 
       {/* Recommendation */}
       {recommended && (
         <div className="rounded-lg border border-zinc-200 bg-white p-5">
           <div className="flex items-center gap-2 mb-3">
-            <Star className="w-4 h-4 text-amber-400" />
             <SectionLabel>Recommendation</SectionLabel>
+            <Star className="w-4 h-4 text-amber-400 mb-2" />
           </div>
-          <p className="text-base text-zinc-700 leading-relaxed mb-4">{result.llm_explanation}</p>
-          <div className="flex items-center gap-3 pt-3 border-t border-zinc-100">
+          <p className="text-sm text-zinc-700 leading-relaxed mb-4">{result.llm_explanation}</p>
+          <div className="flex items-center gap-3 pt-3 border-t border-zinc-100 flex-wrap">
             <span className="text-sm text-zinc-500">Best action:</span>
             <span className="text-sm font-semibold text-zinc-900">{recommended.label}</span>
             <span className="text-zinc-300">·</span>
             <span className="text-sm font-semibold text-zinc-900">{fmt(recommended.expected_value)}</span>
-            <ConfidenceDot c={recommended.confidence} />
+            <span className="text-zinc-300">·</span>
+            <span className="text-sm text-zinc-400">
+              Conviction:{" "}
+              <span className={{high:"text-emerald-600 font-medium",medium:"text-amber-500 font-medium",low:"text-red-400 font-medium"}[recommended.confidence]}>
+                {recommended.confidence.charAt(0).toUpperCase() + recommended.confidence.slice(1)}
+              </span>
+              <span className="text-zinc-300 ml-1 text-xs">(how strongly the model favors this action over alternatives)</span>
+            </span>
           </div>
         </div>
       )}
@@ -448,10 +487,13 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
           value={`$${result.market_signals.futures_price.toFixed(2)}`}
           unit="/bu"
           sub={
-            <span className={`text-sm ${result.market_signals.futures_momentum >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-              {result.market_signals.futures_momentum >= 0 ? "▲" : "▼"}{" "}
-              {fmtPct(Math.abs(result.market_signals.futures_momentum))}/wk
-            </span>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-sm text-zinc-400">/bu</span>
+              <span className={`text-sm font-medium ${result.market_signals.futures_momentum >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                {result.market_signals.futures_momentum >= 0 ? "▲" : "▼"}{" "}
+                {fmtPct(Math.abs(result.market_signals.futures_momentum))}/wk
+              </span>
+            </div>
           }
         />
         <StatTile label="Diesel" value={`$${result.market_signals.diesel_per_gal.toFixed(2)}`} unit="/gal" />
@@ -514,20 +556,19 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
               <span className="text-sm font-medium text-zinc-700 tabular-nums">{value}</span>
             </div>
           ))}
-          {result.market_signals.weather_summary && (
-            <>
-              <Separator className="bg-zinc-100" />
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm text-zinc-400">7-day weather</span>
-                  <WeatherBadge risk={result.market_signals.weather_risk} />
-                </div>
-                <p className="text-sm text-zinc-500 leading-relaxed">{result.market_signals.weather_summary}</p>
-              </div>
-            </>
-          )}
         </div>
       </div>
+
+      {/* 7-day weather — standalone horizontal bubble */}
+      {result.market_signals.weather_summary && (
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <div className="flex items-center justify-between mb-2">
+            <SectionLabel>7-day weather outlook</SectionLabel>
+            <WeatherBadge risk={result.market_signals.weather_risk} />
+          </div>
+          <p className="text-sm text-zinc-500 leading-relaxed">{result.market_signals.weather_summary}</p>
+        </div>
+      )}
 
       {/* Buyer comparison */}
       <div className="rounded-lg border border-zinc-200 bg-white p-5">
@@ -550,8 +591,8 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
                 <tr key={b.name} className="border-b border-zinc-50 last:border-0">
                   <td className="py-3 pr-4">
                     <span className="flex items-center gap-2">
-                      {best && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                       <span className={`text-sm font-medium ${best ? "text-zinc-900" : "text-zinc-500"}`}>{b.name}</span>
+                      {best && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                     </span>
                   </td>
                   <td className="text-right py-3 pr-4 text-sm text-zinc-500 tabular-nums">{fmtBu(b.bid_per_bu)}</td>
@@ -571,17 +612,17 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
         </table>
       </div>
 
-      {/* Scenarios */}
-      <div className="space-y-3">
+      {/* Scenarios — all in one bubble */}
+      <div className="rounded-lg border border-zinc-200 bg-white p-5 space-y-4">
         <SectionLabel>Scenarios</SectionLabel>
 
         {/* Sell now rows */}
-        <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-50">
+        <div className="rounded-md border border-zinc-100 divide-y divide-zinc-50">
           {sellNowScenarios.map((s) => (
-            <div key={s.label} className={`flex items-center justify-between px-5 py-3 ${s.recommended ? "bg-zinc-50" : ""}`}>
+            <div key={s.label} className={`flex items-center justify-between px-4 py-3 ${s.recommended ? "bg-zinc-50 rounded-md" : ""}`}>
               <div className="flex items-center gap-2">
-                {s.recommended && <Star className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                 <span className="text-sm text-zinc-700">{s.label}</span>
+                {s.recommended && <Star className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
               </div>
               <div className="flex items-center gap-5">
                 <span className="text-sm text-zinc-400 tabular-nums">{fmtBu(s.ev_per_bu)}/bu</span>
@@ -597,17 +638,17 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
         {/* Wait / store cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {waitScenarios.map((s) => (
-            <div key={s.label} className={`rounded-lg border bg-white p-4 ${s.recommended ? "border-zinc-400" : "border-zinc-200"}`}>
+            <div key={s.label} className={`rounded-lg border bg-zinc-50 p-4 ${s.recommended ? "border-zinc-400" : "border-zinc-100"}`}>
               <div className="flex items-start justify-between mb-2">
                 <div className="flex items-center gap-1.5">
-                  {s.recommended && <Star className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />}
                   <span className="text-sm font-medium text-zinc-800">{s.label}</span>
+                  {s.recommended && <Star className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />}
                 </div>
                 <ConfidenceDot c={s.confidence} />
               </div>
               <p className="text-2xl font-semibold text-zinc-900 tabular-nums">{fmt(s.expected_value)}</p>
               <p className="text-sm text-zinc-400 tabular-nums mt-0.5">{fmt(s.low)} – {fmt(s.high)}</p>
-              <div className="mt-3 pt-3 border-t border-zinc-50 grid grid-cols-2 gap-x-3 gap-y-1.5">
+              <div className="mt-3 pt-3 border-t border-zinc-100 grid grid-cols-2 gap-x-3 gap-y-1.5">
                 <div>
                   <p className="text-xs text-zinc-400">Cost</p>
                   <p className="text-sm text-zinc-600 tabular-nums">{fmt(s.cost_total)}</p>
@@ -646,12 +687,13 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
               {result.storage_analysis.recommend_delay ? "Storage adds value" : "Sell now preferred"}
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
             {[
               { label: "Storage value/bu", value: `${result.storage_analysis.v_storage_per_bu >= 0 ? "+" : ""}$${result.storage_analysis.v_storage_per_bu.toFixed(4)}` },
               { label: "Total storage value", value: fmt(result.storage_analysis.total_storage_value) },
               { label: "Storage cost", value: fmt(result.storage_analysis.storage_cost_total) },
               { label: "Opportunity cost", value: fmt(result.storage_analysis.opportunity_cost) },
+              { label: "Rate applied", value: `$${result.storage_analysis.storage_rate_per_bu_mo.toFixed(4)}/bu/mo` },
             ].map(({ label, value }) => (
               <div key={label}>
                 <p className="text-xs text-zinc-400 mb-0.5">{label}</p>
@@ -661,13 +703,264 @@ function AnalysisPanel({ result, onClear }: { result: AnalyzeResponse; onClear: 
           </div>
         </div>
       )}
+
+      {/* Transportation analysis */}
+      <div className="rounded-lg border border-zinc-200 bg-white p-5">
+        <SectionLabel>Transportation analysis</SectionLabel>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+          {(() => {
+            const best = result.buyers.find((b) => b.name === result.best_buyer);
+            const nearest = [...result.buyers].sort((a, b) => a.distance_miles - b.distance_miles)[0];
+            const avgCostPerBu = result.buyers.reduce((s, b) => s + b.transport_cost_per_bu, 0) / result.buyers.length;
+            return [
+              { label: "Best buyer haul cost", value: best ? fmt(best.transport_cost) : "—" },
+              { label: "Nearest buyer", value: nearest ? `${nearest.distance_miles.toFixed(1)} mi` : "—" },
+              { label: "Avg haul cost/bu", value: `$${avgCostPerBu.toFixed(3)}` },
+              { label: "Best net/bu", value: best ? fmtBu(best.net_per_bu) : "—" },
+            ];
+          })().map(({ label, value }) => (
+            <div key={label}>
+              <p className="text-xs text-zinc-400 mb-0.5">{label}</p>
+              <p className="text-base font-semibold text-zinc-800 tabular-nums">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-2">
+          {result.buyers.map((b) => {
+            const pct = result.buyers[0]?.net_revenue
+              ? (b.net_revenue / result.buyers[0].net_revenue) * 100
+              : 100;
+            return (
+              <div key={b.name} className="flex items-center gap-3">
+                <span className="text-xs text-zinc-500 w-36 truncate">{b.name}</span>
+                <div className="flex-1 h-2 bg-zinc-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-zinc-700"
+                    style={{ width: `${Math.min(pct, 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs font-medium text-zinc-600 tabular-nums w-28 text-right">
+                  {fmt(b.transport_cost)} haul · {b.distance_miles.toFixed(1)} mi
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Calendar tab ──────────────────────────────────────────────────────────────
+
+type CalendarCommodity = "corn" | "soybeans" | "wheat";
+
+const CALENDAR_DATA: Record<CalendarCommodity, {
+  month: string; short: string; planting: boolean; harvest: boolean;
+  avgChangePct: number; signal: "bullish" | "bearish" | "neutral"; note?: string;
+}[]> = {
+  corn: [
+    { month: "January",   short: "Jan", planting: false, harvest: false, avgChangePct:  0.8, signal: "bullish",  note: "Export demand lifts prices" },
+    { month: "February",  short: "Feb", planting: false, harvest: false, avgChangePct:  0.5, signal: "neutral",  note: "Pre-planting positioning" },
+    { month: "March",     short: "Mar", planting: true,  harvest: false, avgChangePct:  1.2, signal: "bullish",  note: "Planting intention reports" },
+    { month: "April",     short: "Apr", planting: true,  harvest: false, avgChangePct:  1.5, signal: "bullish",  note: "Weather premium builds" },
+    { month: "May",       short: "May", planting: true,  harvest: false, avgChangePct:  1.3, signal: "bullish",  note: "Pre-planting price peak" },
+    { month: "June",      short: "Jun", planting: false, harvest: false, avgChangePct: -0.4, signal: "neutral",  note: "Crop progress pressure" },
+    { month: "July",      short: "Jul", planting: false, harvest: false, avgChangePct: -0.8, signal: "neutral",  note: "Pollination risk — volatile" },
+    { month: "August",    short: "Aug", planting: false, harvest: true,  avgChangePct: -1.5, signal: "bearish",  note: "Harvest approaches" },
+    { month: "September", short: "Sep", planting: false, harvest: true,  avgChangePct: -2.1, signal: "bearish",  note: "Harvest pressure low" },
+    { month: "October",   short: "Oct", planting: false, harvest: true,  avgChangePct: -0.5, signal: "neutral",  note: "Harvest eases" },
+    { month: "November",  short: "Nov", planting: false, harvest: false, avgChangePct:  0.6, signal: "bullish",  note: "Export demand returns" },
+    { month: "December",  short: "Dec", planting: false, harvest: false, avgChangePct:  0.9, signal: "bullish",  note: "Year-end positioning" },
+  ],
+  soybeans: [
+    { month: "January",   short: "Jan", planting: false, harvest: false, avgChangePct:  1.2, signal: "bullish",  note: "South America crop watch" },
+    { month: "February",  short: "Feb", planting: false, harvest: false, avgChangePct:  0.8, signal: "bullish",  note: "SA harvest pressure begins" },
+    { month: "March",     short: "Mar", planting: false, harvest: false, avgChangePct: -0.3, signal: "neutral",  note: "SA harvest + US planting prep" },
+    { month: "April",     short: "Apr", planting: true,  harvest: false, avgChangePct:  0.9, signal: "bullish",  note: "Planting intentions" },
+    { month: "May",       short: "May", planting: true,  harvest: false, avgChangePct:  1.4, signal: "bullish",  note: "China demand peak" },
+    { month: "June",      short: "Jun", planting: true,  harvest: false, avgChangePct:  0.7, signal: "bullish",  note: "Planting progress" },
+    { month: "July",      short: "Jul", planting: false, harvest: false, avgChangePct:  1.8, signal: "bullish",  note: "Drought scare premium — most volatile" },
+    { month: "August",    short: "Aug", planting: false, harvest: true,  avgChangePct: -1.2, signal: "bearish",  note: "Pod-fill, harvest nears" },
+    { month: "September", short: "Sep", planting: false, harvest: true,  avgChangePct: -2.3, signal: "bearish",  note: "Harvest low" },
+    { month: "October",   short: "Oct", planting: false, harvest: true,  avgChangePct: -0.8, signal: "bearish",  note: "Harvest pressure" },
+    { month: "November",  short: "Nov", planting: false, harvest: false, avgChangePct:  0.4, signal: "neutral",  note: "Export lift" },
+    { month: "December",  short: "Dec", planting: false, harvest: false, avgChangePct:  0.6, signal: "neutral",  note: "Neutral" },
+  ],
+  wheat: [
+    { month: "January",   short: "Jan", planting: false, harvest: false, avgChangePct: -0.2, signal: "neutral",  note: "Winter dormancy" },
+    { month: "February",  short: "Feb", planting: false, harvest: false, avgChangePct:  0.3, signal: "neutral",  note: "Freeze risk watch" },
+    { month: "March",     short: "Mar", planting: true,  harvest: false, avgChangePct:  1.1, signal: "bullish",  note: "Spring green-up rally" },
+    { month: "April",     short: "Apr", planting: true,  harvest: false, avgChangePct:  1.4, signal: "bullish",  note: "Condition reports" },
+    { month: "May",       short: "May", planting: false, harvest: false, avgChangePct:  0.6, signal: "bullish",  note: "Pre-harvest" },
+    { month: "June",      short: "Jun", planting: false, harvest: true,  avgChangePct: -2.0, signal: "bearish",  note: "HRW harvest low" },
+    { month: "July",      short: "Jul", planting: false, harvest: true,  avgChangePct: -1.5, signal: "bearish",  note: "SRW harvest low" },
+    { month: "August",    short: "Aug", planting: true,  harvest: false, avgChangePct:  0.2, signal: "neutral",  note: "Post-harvest stabilize / winter planting" },
+    { month: "September", short: "Sep", planting: true,  harvest: false, avgChangePct:  0.5, signal: "neutral",  note: "Fall demand" },
+    { month: "October",   short: "Oct", planting: true,  harvest: false, avgChangePct:  0.8, signal: "bullish",  note: "Export season" },
+    { month: "November",  short: "Nov", planting: false, harvest: false, avgChangePct:  1.0, signal: "bullish",  note: "Export demand" },
+    { month: "December",  short: "Dec", planting: false, harvest: false, avgChangePct:  0.7, signal: "bullish",  note: "Year-end" },
+  ],
+};
+
+const BEST_SELL_MONTHS: Record<CalendarCommodity, number[]> = {
+  corn:     [4, 5, 3],
+  soybeans: [7, 5, 1],
+  wheat:    [4, 3, 11],
+};
+
+const WORST_SELL_MONTHS: Record<CalendarCommodity, number[]> = {
+  corn:     [9, 8, 7],
+  soybeans: [9, 8, 10],
+  wheat:    [6, 7, 5],
+};
+
+function CalendarTab() {
+  const [commodity, setCommodity] = useState<CalendarCommodity>("corn");
+  const currentMonth = new Date().getMonth() + 1;
+  const data = CALENDAR_DATA[commodity];
+  const bestSell = BEST_SELL_MONTHS[commodity];
+  const worstSell = WORST_SELL_MONTHS[commodity];
+  const barMax = Math.max(...data.map((d) => Math.abs(d.avgChangePct)));
+
+  return (
+    <div className="p-5 space-y-5 w-full">
+      {/* Header + commodity selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <img src="/silo.png" alt="Silo" className="w-5 h-5 object-contain" />
+          <SectionLabel>Seasonal calendar</SectionLabel>
+        </div>
+        <div className="flex gap-2">
+          {(["corn", "soybeans", "wheat"] as CalendarCommodity[]).map((c) => (
+            <button
+              key={c}
+              onClick={() => setCommodity(c)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
+                commodity === c
+                  ? "bg-zinc-900 text-white"
+                  : "bg-white border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+              }`}
+            >
+              {c.charAt(0).toUpperCase() + c.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-4 text-xs text-zinc-500">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-300 inline-block" /> Planting window</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-100 border border-amber-300 inline-block" /> Harvest window</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-zinc-900 inline-block" /> Current month</span>
+        <span className="flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-500" /> Bullish</span>
+        <span className="flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-red-400" /> Bearish</span>
+      </div>
+
+      {/* Calendar grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        {data.map((m, i) => {
+          const monthNum = i + 1;
+          const isCurrent = monthNum === currentMonth;
+          const isBest = bestSell.includes(monthNum);
+          const isWorst = worstSell.includes(monthNum);
+          const barWidth = Math.round((Math.abs(m.avgChangePct) / barMax) * 100);
+
+          let bg = "bg-white border-zinc-200";
+          if (isCurrent) bg = "bg-zinc-900 border-zinc-900";
+          else if (m.planting && m.harvest) bg = "bg-yellow-50 border-yellow-200";
+          else if (m.planting) bg = "bg-emerald-50 border-emerald-200";
+          else if (m.harvest) bg = "bg-amber-50 border-amber-200";
+
+          return (
+            <div key={m.month} className={`rounded-xl border p-4 flex flex-col gap-2 ${bg}`}>
+              <div className="flex items-center justify-between">
+                <span className={`text-sm font-semibold ${isCurrent ? "text-white" : "text-zinc-800"}`}>
+                  {m.short}
+                  {isCurrent && <span className="ml-1.5 text-xs font-normal opacity-60">now</span>}
+                </span>
+                {m.signal === "bullish" && <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />}
+                {m.signal === "bearish" && <TrendingDown className="w-3.5 h-3.5 text-red-400" />}
+                {m.signal === "neutral" && <Minus className="w-3.5 h-3.5 text-zinc-400" />}
+              </div>
+
+              <div className="flex gap-1 flex-wrap">
+                {m.planting && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isCurrent ? "bg-white/20 text-white" : "bg-emerald-100 text-emerald-700"}`}>
+                    Planting
+                  </span>
+                )}
+                {m.harvest && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isCurrent ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}>
+                    Harvest
+                  </span>
+                )}
+                {isBest && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isCurrent ? "bg-white/20 text-white" : "bg-blue-50 text-blue-600"}`}>
+                    ★ Sell
+                  </span>
+                )}
+                {isWorst && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isCurrent ? "bg-white/20 text-white" : "bg-red-50 text-red-500"}`}>
+                    Low
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <div className={`text-[11px] mb-1 ${isCurrent ? "text-white/70" : "text-zinc-400"}`}>
+                  avg {m.avgChangePct > 0 ? "+" : ""}{m.avgChangePct.toFixed(1)}%/mo
+                </div>
+                <div className={`h-1 rounded-full ${isCurrent ? "bg-white/20" : "bg-zinc-100"}`}>
+                  <div
+                    className={`h-1 rounded-full ${m.avgChangePct > 0 ? "bg-emerald-400" : "bg-red-400"}`}
+                    style={{ width: `${barWidth}%` }}
+                  />
+                </div>
+              </div>
+
+              {m.note && (
+                <p className={`text-[11px] leading-snug ${isCurrent ? "text-white/60" : "text-zinc-400"}`}>
+                  {m.note}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Best months to sell</p>
+          <div className="flex gap-2 flex-wrap">
+            {bestSell.map((m) => (
+              <span key={m} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-sm font-medium">
+                {data[m - 1].month}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-zinc-400 mt-3">Historically strongest price months for {commodity}.</p>
+        </div>
+        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Harvest price pressure</p>
+          <div className="flex gap-2 flex-wrap">
+            {worstSell.map((m) => (
+              <span key={m} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium">
+                {data[m - 1].month}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-zinc-400 mt-3">Harvest supply glut typically drives prices down. Store if possible.</p>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
-type Tab = "market" | "analysis" | "methodology";
+type Tab = "market" | "analysis" | "methodology" | "calendar";
 
 export default function Dashboard() {
   const [tab, setTab] = useState<Tab>("market");
@@ -675,10 +968,16 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [useMock, setUseMock] = useState(false);
+  const [analyzedAt, setAnalyzedAt] = useState<Date>(new Date());
   const [nearbyElevators, setNearbyElevators] = useState<NearbyElevator[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
+  const EMPTY_ADDR: AddressValue = { street: "", city: "", state: "", zip: "" };
+  const [farmAddr, setFarmAddr] = useState<AddressValue>(EMPTY_ADDR);
+  const [farmAddressVerified, setFarmAddressVerified] = useState(false);
+  const [buyerAddrs, setBuyerAddrs] = useState<AddressValue[]>([EMPTY_ADDR]);
+  const [buyerAddrsVerified, setBuyerAddrsVerified] = useState<boolean[]>([false]);
 
   const {
     register,
@@ -690,19 +989,34 @@ export default function Dashboard() {
   } = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      commodity: undefined,
+      commodity: "" as "soybeans" | "corn" | "wheat",
       quantity_bu: "",
-      farm_street: "",
-      farm_city: "",
-      farm_state: "",
-      farm_zip: "",
+      farm_address: "",
       buyers: [{ name: "", bid_per_bu: "", address: "" }],
       has_storage: false,
       storage_type: "on_farm",
       storage_months: 3,
-      urgency: undefined,
+      urgency: "" as "low" | "medium" | "high",
     },
   });
+
+  // Load saved farm address from profile if user is signed in
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session) return;
+      try {
+        const profile = await getProfile(data.session.access_token);
+        if (profile.farm_address) {
+          const parsed = fromAddressString(profile.farm_address);
+          setFarmAddr(parsed);
+          setFarmAddressVerified(true);
+          setValue("farm_address", profile.farm_address);
+        }
+      } catch {
+        // not signed in or no profile — fine
+      }
+    });
+  }, [setValue]);
 
   const { fields, append, remove } = useFieldArray({ control, name: "buyers" });
   const hasStorage = watch("has_storage");
@@ -711,22 +1025,22 @@ export default function Dashboard() {
   const storageType = watch("storage_type");
   const urgency = watch("urgency");
 
-  function getFarmAddress() {
-    const { farm_street, farm_city, farm_state, farm_zip } = watch();
-    return `${farm_street}, ${farm_city}, ${farm_state} ${farm_zip}`.trim();
+  function setBuyerAddr(idx: number, addr: AddressValue, verified: boolean) {
+    setBuyerAddrs((prev) => { const n = [...prev]; n[idx] = addr; return n; });
+    setBuyerAddrsVerified((prev) => { const n = [...prev]; n[idx] = verified; return n; });
+    setValue(`buyers.${idx}.address`, toAddressString(addr), { shouldValidate: true });
   }
 
   async function onSubmit(values: FormValues) {
     setLoading(true);
     setApiError(null);
-    const farm_address = `${values.farm_street}, ${values.farm_city}, ${values.farm_state} ${values.farm_zip}`.trim();
     try {
       const res = await analyze({
         ...values,
-        farm_address,
         storage_months: values.has_storage ? values.storage_months : undefined,
       });
       setResult(res);
+      setAnalyzedAt(new Date());
       setUseMock(false);
       setTab("analysis");
     } catch (err) {
@@ -738,6 +1052,7 @@ export default function Dashboard() {
 
   function loadMock() {
     setResult(MOCK_RESPONSE);
+    setAnalyzedAt(new Date());
     setUseMock(true);
     setApiError(null);
     setTab("analysis");
@@ -759,10 +1074,15 @@ export default function Dashboard() {
           );
           const data = await res.json();
           const a = data.address ?? {};
-          setValue("farm_street", `${a.house_number ?? ""} ${a.road ?? ""}`.trim());
-          setValue("farm_city", a.city ?? a.town ?? a.village ?? a.hamlet ?? "");
-          setValue("farm_state", a.state ?? "");
-          setValue("farm_zip", a.postcode ?? "");
+          const parsed: AddressValue = {
+            street: `${a.house_number ?? ""} ${a.road ?? ""}`.trim(),
+            city:   a.city ?? a.town ?? a.village ?? a.hamlet ?? "",
+            state:  a.state ?? "",
+            zip:    a.postcode ?? "",
+          };
+          setFarmAddr(parsed);
+          setFarmAddressVerified(true);
+          setValue("farm_address", toAddressString(parsed));
         } catch {
           setNearbyError("Could not reverse-geocode location.");
         } finally {
@@ -777,15 +1097,15 @@ export default function Dashboard() {
   }
 
   async function lookupNearby() {
-    const addr = getFarmAddress();
-    if (!addr || addr.length < 5) {
+    const addrStr = toAddressString(farmAddr);
+    if (addrStr.length < 5) {
       setNearbyError("Enter a farm address first.");
       return;
     }
     setNearbyLoading(true);
     setNearbyError(null);
     try {
-      const res = await fetchNearbyElevators(addr, 50);
+      const res = await fetchNearbyElevators(addrStr, 50);
       setNearbyElevators(res.elevators);
       if (res.elevators.length === 0) setNearbyError("No elevators found within 50 miles.");
     } catch {
@@ -796,7 +1116,13 @@ export default function Dashboard() {
   }
 
   function addNearbyAsBuyer(elev: NearbyElevator) {
+    const idx = fields.length;
     append({ name: elev.name, bid_per_bu: "", address: elev.address });
+    const parsed = fromAddressString(elev.address);
+    setBuyerAddrs((prev) => { const n = [...prev]; n[idx] = parsed; return n; });
+    setBuyerAddrsVerified((prev) => { const n = [...prev]; n[idx] = true; return n; });
+    // Ensure the form value uses the exact elevator address string, not the re-parsed version
+    setTimeout(() => setValue(`buyers.${idx}.address`, elev.address, { shouldValidate: true }), 0);
   }
 
   return (
@@ -815,7 +1141,9 @@ export default function Dashboard() {
                 }
               >
                 <SelectTrigger className="h-10 text-sm w-full">
-                  <SelectValue placeholder="Select…" />
+                  <SelectValue placeholder="Select…">
+                    {commodity ? commodity.charAt(0).toUpperCase() + commodity.slice(1) : ""}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="corn">Corn</SelectItem>
@@ -845,16 +1173,15 @@ export default function Dashboard() {
                   : <LocateFixed className="w-4 h-4" />}
                 Find my location
               </button>
-              <Input placeholder="Street address" className="h-10 text-sm" {...register("farm_street")} />
-              {errors.farm_street && <p className="text-red-500 text-xs">{errors.farm_street.message}</p>}
-              <div className="grid grid-cols-5 gap-2">
-                <Input placeholder="City" className="h-10 text-sm col-span-2" {...register("farm_city")} />
-                <Input placeholder="State" className="h-10 text-sm col-span-1" {...register("farm_state")} />
-                <Input placeholder="ZIP" className="h-10 text-sm col-span-2" {...register("farm_zip")} />
-              </div>
-              {(errors.farm_city || errors.farm_state || errors.farm_zip) && (
-                <p className="text-red-500 text-xs">City, state, and ZIP required</p>
-              )}
+              <AddressAutocomplete
+                value={farmAddr}
+                onChange={(addr, verified) => {
+                  setFarmAddr(addr);
+                  setFarmAddressVerified(verified);
+                  setValue("farm_address", toAddressString(addr), { shouldValidate: true });
+                }}
+              />
+              {errors.farm_address && <p className="text-red-500 text-xs">{errors.farm_address.message}</p>}
             </div>
           </div>
 
@@ -868,7 +1195,11 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Buyer {idx + 1}</span>
                   {fields.length > 1 && (
-                    <button type="button" onClick={() => remove(idx)} className="text-zinc-300 hover:text-red-400 transition-colors">
+                    <button type="button" onClick={() => {
+                      remove(idx);
+                      setBuyerAddrs((p) => p.filter((_, i) => i !== idx));
+                      setBuyerAddrsVerified((p) => p.filter((_, i) => i !== idx));
+                    }} className="text-zinc-300 hover:text-red-400 transition-colors">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -877,13 +1208,20 @@ export default function Dashboard() {
                 {errors.buyers?.[idx]?.name && <p className="text-red-500 text-xs">{errors.buyers[idx]?.name?.message}</p>}
                 <Input type="number" step="0.01" placeholder="$/bu bid" className="h-9 text-sm" {...register(`buyers.${idx}.bid_per_bu`)} />
                 {errors.buyers?.[idx]?.bid_per_bu && <p className="text-red-500 text-xs">{errors.buyers[idx]?.bid_per_bu?.message}</p>}
-                <Input placeholder="Address" className="h-9 text-sm" {...register(`buyers.${idx}.address`)} />
+                <AddressAutocomplete
+                  value={buyerAddrs[idx] ?? { street: "", city: "", state: "", zip: "" }}
+                  onChange={(addr, verified) => setBuyerAddr(idx, addr, verified)}
+                />
                 {errors.buyers?.[idx]?.address && <p className="text-red-500 text-xs">{errors.buyers[idx]?.address?.message}</p>}
               </div>
             ))}
             <button
               type="button"
-              onClick={() => append({ name: "", bid_per_bu: "", address: "" })}
+              onClick={() => {
+                append({ name: "", bid_per_bu: "", address: "" });
+                setBuyerAddrs((p) => [...p, { street: "", city: "", state: "", zip: "" }]);
+                setBuyerAddrsVerified((p) => [...p, false]);
+              }}
               className="w-full py-2 border border-dashed border-zinc-200 rounded-md text-sm text-zinc-400 hover:text-zinc-700 hover:border-zinc-300 transition-colors flex items-center justify-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" /> Add buyer
@@ -900,7 +1238,7 @@ export default function Dashboard() {
                 {nearbyLoading
                   ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   : <Search className="w-3.5 h-3.5" />}
-                Find nearby elevators
+                Find nearby elevators/co-ops
               </button>
 
               {nearbyError && (
@@ -1017,7 +1355,15 @@ export default function Dashboard() {
           )}
 
           <div className="space-y-2 pt-1">
-            <Button type="submit" disabled={loading} className="w-full h-9 text-sm bg-zinc-900 hover:bg-zinc-700 text-white">
+            <Button
+              type="submit"
+              disabled={
+                loading ||
+                (!!toAddressString(farmAddr).trim() && !farmAddressVerified) ||
+                buyerAddrs.some((a, i) => !!toAddressString(a).trim() && !buyerAddrsVerified[i])
+              }
+              className="w-full h-9 text-sm bg-zinc-900 hover:bg-zinc-700 text-white"
+            >
               {loading ? (
                 <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Analyzing…</span>
               ) : "Run analysis"}
@@ -1040,6 +1386,7 @@ export default function Dashboard() {
           {([
             ["market", "Market"] as const,
             ["analysis", "Analysis"] as const,
+            ["calendar", "Calendar"] as const,
             ["methodology", "Methodology"] as const,
           ]).map(([t, label]) => (
             <button
@@ -1064,7 +1411,7 @@ export default function Dashboard() {
           {tab === "market" && <MarketTab useMock={useMock} />}
           {tab === "analysis" && (
             result
-              ? <AnalysisPanel result={result} onClear={() => { setResult(null); setTab("market"); }} />
+              ? <AnalysisPanel result={result} onClear={() => { setResult(null); setTab("market"); }} analyzedAt={analyzedAt} />
               : (
                 <div className="flex flex-col items-center justify-center h-full text-center px-8">
                   <p className="text-base font-medium text-zinc-400">No analysis yet</p>
@@ -1072,6 +1419,7 @@ export default function Dashboard() {
                 </div>
               )
           )}
+          {tab === "calendar" && <CalendarTab />}
           {tab === "methodology" && <MethodologyTab />}
         </div>
       </div>

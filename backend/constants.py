@@ -6,9 +6,23 @@ TRANSPORT_FUEL_SCALE = 0.012             # $/bu/mile fuel component at reference
 DIESEL_REFERENCE = 3.80                  # reference diesel $/gal
 
 # ── Storage ────────────────────────────────────────────────────────────────────
+# Baseline rates (Midwest / PADD 2) — used as fallback when state is unknown
 STORAGE_COST_ON_FARM = 0.015             # $/bu/month (electricity, shrinkage, labor)
 STORAGE_COST_COMMERCIAL = 0.040          # $/bu/month (elevator handling + storage)
 INTEREST_RATE_FALLBACK = 0.04            # annual, used if FRED down
+
+# Regional storage rates by PADD.
+# On-farm cost drivers: electricity (aeration/drying), shrinkage, labor.
+# Commercial cost drivers: elevator handling fee, conditioning, insurance.
+# Gulf Coast (PADD 3) and East Coast (PADD 1) carry higher humidity/heat premiums.
+# Rocky Mountain (PADD 4) benefits from dry climate — lowest conditioning costs.
+STORAGE_COST_BY_PADD: dict[int, dict[str, float]] = {
+    1: {"on_farm": 0.018, "commercial": 0.046},  # East Coast — humid, higher conditioning
+    2: {"on_farm": 0.015, "commercial": 0.040},  # Midwest — benchmark, dry-cold winters
+    3: {"on_farm": 0.022, "commercial": 0.052},  # Gulf Coast — heat + humidity, heavy drying
+    4: {"on_farm": 0.013, "commercial": 0.036},  # Rocky Mountain — dry climate, low conditioning
+    5: {"on_farm": 0.016, "commercial": 0.044},  # West Coast — moderate, varies by sub-region
+}
 
 # ── Hedging ────────────────────────────────────────────────────────────────────
 HEDGE_COMMISSION_PER_BU = 0.015          # round-trip brokerage $/bu
@@ -89,6 +103,13 @@ STATE_TO_USDA_REGION: dict[str, list[str]] = {
     "OK": ["oklahoma", " ok "],
     "AR": ["arkansas", " ar "],
 }
+
+def get_storage_rate(state: str, storage_type: str) -> float:
+    """Return the regional $/bu/month storage rate for a given state and type."""
+    padd = STATE_TO_PADD.get(state.upper(), 2)  # default to Midwest
+    rates = STORAGE_COST_BY_PADD.get(padd, STORAGE_COST_BY_PADD[2])
+    return rates.get(storage_type, STORAGE_COST_ON_FARM)
+
 
 # ── API bases ──────────────────────────────────────────────────────────────────
 USDA_BASE = "https://marsapi.ams.usda.gov/services/v1.2"

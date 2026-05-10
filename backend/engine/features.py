@@ -53,6 +53,9 @@ class FeatureSet:
     # ── Calendar ───────────────────────────────────────────────────────────────
     current_week: int
 
+    # ── Location ───────────────────────────────────────────────────────────────
+    farm_state: str                   # 2-letter state abbr (e.g. "IL"), "" if unknown
+
 
 def build_features(commodity: str, farm_address: str) -> FeatureSet:
     """
@@ -108,4 +111,5 @@ def build_features(commodity: str, farm_address: str) -> FeatureSet:
         precip_anomaly=wx["precip_anomaly"],
         inventory_signal=round(inventory_signal, 3),
         current_week=current_week,
+        farm_state=state or "",
     )

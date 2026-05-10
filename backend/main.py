@@ -2,8 +2,26 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import time
+import os
+import logging
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("silo")
+
+# Log API key status on startup
+def _key_status(name: str) -> str:
+    val = os.getenv(name, "")
+    return "✓" if val.strip() else "✗ MISSING"
+
+log.info("API keys — GEMINI:%s  GOOGLE_MAPS:%s  FRED:%s  USDA:%s  SUPABASE:%s",
+    _key_status("GEMINI_API_KEY"),
+    _key_status("GOOGLE_MAPS_API_KEY"),
+    _key_status("FRED_API_KEY"),
+    _key_status("USDA_API_KEY"),
+    _key_status("SUPABASE_URL"),
+)
 
 from backend.models import (
     AnalyzeRequest, AnalyzeResponse, MarketSignals,
@@ -41,9 +59,28 @@ app.include_router(calendar.router)
 
 # ── Market cache ──────────────────────────────────────────────────────────────
 # Futures/diesel/tbill: 5-min TTL. News: 30-min TTL (changes slowly).
+# News is stored separately so a failed refresh never wipes good headlines.
 _market_cache: dict = {}
-_MARKET_TTL   = 5 * 60   # seconds
+_news_cache: list = []          # last known good headlines
+_news_cache_ts: float = 0.0
+_MARKET_TTL   = 5 * 60
 _NEWS_TTL     = 30 * 60
+
+
+def _get_headlines() -> list:
+    """Return cached headlines if fresh, otherwise fetch and update cache.
+    Always returns the last known good list — never an empty list from a failed fetch."""
+    global _news_cache, _news_cache_ts
+    now = time.time()
+    if now - _news_cache_ts < _NEWS_TTL:
+        return _news_cache
+    fresh = get_ag_headlines()
+    if fresh:                           # only replace cache if we actually got something
+        _news_cache = fresh
+        _news_cache_ts = now
+    elif not _news_cache:               # first call with no results — set timestamp so we retry in 2 min
+        _news_cache_ts = now - _NEWS_TTL + 120
+    return _news_cache
 
 
 @app.get("/health")
@@ -51,15 +88,35 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/validate-address")
+def validate_address_endpoint(address: str):
+    """
+    Geocode an address via Nominatim and return whether it resolves.
+    Used by the frontend before saving a farm address to the profile.
+    """
+    from geopy.geocoders import Nominatim
+    address = address.strip()
+    if len(address) < 5:
+        return {"valid": False, "message": "Address is too short."}
+    try:
+        geolocator = Nominatim(user_agent="silo-grain-recommender/1.0", timeout=6)
+        location = geolocator.geocode(address)
+    except Exception:
+        # Network error — allow through so a bad connection doesn't block saving
+        return {"valid": True, "message": "Could not verify (network error), saved anyway."}
+    if not location:
+        return {"valid": False, "message": "Address could not be found. Please enter a full street address including city and state."}
+    return {"valid": True, "message": "Address verified.", "lat": location.latitude, "lon": location.longitude}
+
+
 @app.get("/nearby")
 def nearby_elevators(address: str, radius: float = 50):
-    """
-    Return grain elevators within `radius` miles (default 50) of the given farm address.
-    Sorted by distance ascending.
-    """
     if radius < 1 or radius > 100:
         raise HTTPException(status_code=400, detail="radius must be 1–100")
+    address = address.strip()
+    log.info("/nearby address=%r radius=%.0f", address, radius)
     results = get_nearby_elevators(address, radius_miles=radius)
+    log.info("/nearby → %d elevators found", len(results))
     return {"address": address, "radius_miles": radius, "count": len(results), "elevators": results}
 
 
@@ -72,23 +129,12 @@ def market_context(location: str = "Decatur, IL"):
     """
     now = time.time()
     mkey = f"market:{location}"
-    nkey = f"news:{location}"
 
-    # Serve from cache if fresh
+    # Serve full cached response if market data is still fresh
     if mkey in _market_cache and now - _market_cache[mkey]["ts"] < _MARKET_TTL:
-        cached = _market_cache[mkey]["data"]
-        # Swap in fresh news only if news cache is also still warm
-        if nkey in _market_cache and now - _market_cache[nkey]["ts"] < _NEWS_TTL:
-            return cached
-        # News stale — refresh just headlines
-        raw_headlines = get_ag_headlines(max_per_feed=3)
-        headlines = [NewsHeadline(**h) for h in raw_headlines]
-        _market_cache[nkey] = {"ts": now, "data": headlines}
-        result = MarketContextResponse(**{**cached.model_dump(), "headlines": headlines})
-        _market_cache[mkey]["data"] = result
-        return result
+        return _market_cache[mkey]["data"]
 
-    # Full refresh
+    # Fetch market data; headlines come from the separate news cache
     commodities = ["corn", "soybeans", "wheat"]
     quotes = []
     for commodity in commodities:
@@ -104,13 +150,7 @@ def market_context(location: str = "Decatur, IL"):
     diesel = get_diesel_price()
     tbill  = get_tbill_rate()
     wx     = get_weather_data(location)
-
-    if nkey in _market_cache and now - _market_cache[nkey]["ts"] < _NEWS_TTL:
-        headlines = _market_cache[nkey]["data"]
-    else:
-        raw_headlines = get_ag_headlines(max_per_feed=3)
-        headlines = [NewsHeadline(**h) for h in raw_headlines]
-        _market_cache[nkey] = {"ts": now, "data": headlines}
+    headlines = [NewsHeadline(**h) for h in _get_headlines()]
 
     result = MarketContextResponse(
         quotes=quotes,
@@ -205,12 +245,17 @@ def price_history(commodity: str, period: str = "6mo"):
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest):
+    log.info("/analyze commodity=%s qty=%.0f farm=%r buyers=%s",
+        req.commodity, req.quantity_bu, req.farm_address,
+        [b.address for b in req.buyers])
+
     # ── (1) Feature Engineering Layer ─────────────────────────────────────────
     # Fetch all external data and assemble into a model-ready FeatureSet.
     features = build_features(req.commodity, req.farm_address)
 
     # ── (2) Distances ──────────────────────────────────────────────────────────
     distances = get_distances(req.farm_address, [b.address for b in req.buyers])
+    log.info("/analyze distances=%s (Google Maps or geopy fallback)", distances)
 
     # ── (3) Buyer Comparison ───────────────────────────────────────────────────
     # Transport cost is fuel-scaled: C = d × (fixed + fuel_scale × diesel/ref)
@@ -242,6 +287,7 @@ def analyze(req: AnalyzeRequest):
             quantity_bu=req.quantity_bu,
             storage_months=req.storage_months,
             storage_type=req.storage_type,
+            farm_state=features.farm_state,
         )
 
     # ── (6) Scenario Simulation ────────────────────────────────────────────────

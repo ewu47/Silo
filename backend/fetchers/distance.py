@@ -1,7 +1,10 @@
 import os
+import logging
 import requests
 from geopy.distance import geodesic
 from geopy.geocoders import Nominatim
+
+log = logging.getLogger("silo")
 
 _geolocator = Nominatim(user_agent="silo")
 
@@ -54,12 +57,22 @@ def _geopy_distance(origin: str, destination: str) -> float | None:
 
 def get_distances(farm_address: str, buyer_addresses: list[str]) -> list[float]:
     """Return driving distances in miles for each buyer. Falls back to geopy if Google fails."""
+    log.info("distances: farm=%r", farm_address)
+    for i, addr in enumerate(buyer_addresses):
+        log.info("distances: buyer[%d]=%r", i, addr)
+
     google = _google_distance(farm_address, buyer_addresses)
+    if google and any(v is not None for v in google):
+        log.info("distances: using Google Maps API → %s", google)
+    else:
+        log.info("distances: Google Maps unavailable, using geopy fallback")
+
     results = []
     for i, addr in enumerate(buyer_addresses):
         if google and google[i] is not None:
             results.append(round(google[i], 1))
         else:
             fallback = _geopy_distance(farm_address, addr)
+            log.info("distances: geopy fallback buyer[%d] → %s", i, fallback)
             results.append(round(fallback, 1) if fallback else 20.0)
     return results

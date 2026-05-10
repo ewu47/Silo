@@ -10,8 +10,11 @@ It interprets what the quantitative engine found.
 
 import os
 import json
+import logging
 from google import genai
 from backend.models import AnalyzeResponse
+
+log = logging.getLogger("silo")
 
 SYSTEM_PROMPT = """You are Silo's market explanation engine. You receive structured quantitative outputs from a commodity pricing and scenario analysis model and translate them into clear, plain-English explanations for grain farmers.
 
@@ -94,12 +97,14 @@ def get_llm_explanation(response: AnalyzeResponse) -> str:
         }
 
         result = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=f"{SYSTEM_PROMPT}\n\nExplain this grain sale analysis to the farmer:\n{json.dumps(payload, indent=2)}",
         )
+        log.info("llm: Gemini explanation OK (%d chars)", len(result.text))
         return result.text.strip()
 
-    except Exception:
+    except Exception as e:
+        log.warning("llm: Gemini failed (%s), using fallback explanation", e.__class__.__name__)
         return _fallback_explanation(response)
 
 

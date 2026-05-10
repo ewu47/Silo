@@ -59,8 +59,8 @@ def _wait_scenario(
 
     # C(a): storage cost if farmer has storage
     if has_storage:
-        from backend.constants import STORAGE_COST_ON_FARM, STORAGE_COST_COMMERCIAL
-        phys_rate = STORAGE_COST_ON_FARM if storage_type == "on_farm" else STORAGE_COST_COMMERCIAL
+        from backend.constants import get_storage_rate
+        phys_rate = get_storage_rate(features.farm_state, storage_type)
         storage_cost_per_bu = phys_rate * n_months
         # Opportunity cost: interest on delayed cash
         annual_rate = tbill_rate_pct / 100
@@ -179,6 +179,7 @@ def calc_scenarios(
             quantity_bu=quantity_bu,
             storage_months=storage_months,
             storage_type=storage_type,
+            farm_state=features.farm_state,
         )
         # Confidence: hedge eliminates futures risk; only basis risk remains.
         # Normalize basis_std ($/bu) to fractional std to match _confidence thresholds.

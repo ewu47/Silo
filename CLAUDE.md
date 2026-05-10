@@ -34,7 +34,7 @@ A farmer inputs their selling situation. Silo runs quantitative analysis across 
 - **NOAA NWS** (`api.weather.gov/points/{lat},{lon}`) — 7-day forecast, no key needed. ✓ working.
 - **FRED** (`api.stlouisfed.org/fred/series/observations`) — PADD regional diesel (e.g. `GASD2SW` for Midwest) and T-bill rate (`DTB3`). Farm state maps to a PADD; falls back to national `GASDESW` then static. ✓ working. No separate EIA key needed — EIA regional data is hosted on FRED.
 - **Google Maps Distance Matrix** — `REQUEST_DENIED` on current key (billing not enabled). Active fallback: geopy straight-line × 1.25 road factor.
-- **RSS/news fetcher** — feedparser pulling ag headlines (DTN, USDA, etc.) for market dashboard.
+- **Ag news headlines** — `fetchers/news.py` queries USDA Market News API (`/reports?q=grain|corn|wheat|soybean`) for recent grain reports. Links point to `https://mymarketnews.ams.usda.gov/viewReport/{slug_id}`. Filtered to grain-relevant titles. Falls back to empty list (never crashes). News cached separately from price data (30-min TTL) so headlines survive price refreshes. No RSS feeds used.
 - **Cash bid by location**: no free programmatic source exists. Farmer inputs bid manually. USDA state/regional average used as benchmark.
 - **Nearby elevators**: no live API exists. `GET /nearby` geocodes the farm address via Nominatim (OpenStreetMap, no key) and filters a static dataset of ~30 Midwest elevator locations by radius (default 50mi). Farmer still enters bids manually.
 - **Location resolution**: `fetchers/location.py` geocodes farm address via Nominatim and returns a 2-letter state abbreviation. Called once per `/analyze` request; result routes both the FRED PADD diesel series and the USDA state report selection.
@@ -67,7 +67,7 @@ silo/
 │       ├── weather.py           # NOAA NWS
 │       ├── distance.py          # Google Maps / geopy fallback
 │       ├── usda.py              # USDA Market News API (state-specific report routing)
-│       ├── news.py              # RSS ag news headlines
+│       ├── news.py              # USDA Market News API headlines (grain reports, real links)
 │       ├── location.py          # Nominatim state resolver (farm address → state abbr)
 │       └── nearby_elevators.py  # Nominatim geocode + static elevator dataset
 └── frontend/

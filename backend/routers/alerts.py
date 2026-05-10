@@ -5,6 +5,7 @@ from backend.db import get_supabase
 from backend.models import BasisAlert, BasisAlertCreate
 from backend.fetchers.usda import get_regional_cash_price
 from backend.fetchers.futures import get_futures_features
+from backend.validators import validate_address
 
 router = APIRouter(prefix="/alerts/basis", tags=["alerts"])
 
@@ -25,6 +26,7 @@ def _row_to_alert(row: dict) -> BasisAlert:
 
 @router.post("", response_model=BasisAlert)
 def create_alert(body: BasisAlertCreate, user_id: str = Depends(get_current_user)):
+    validate_address(body.farm_address, "farm_address")
     db = get_supabase()
     resp = db.table("basis_alerts").insert({
         "user_id": user_id,
