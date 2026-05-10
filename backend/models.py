@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 
 
 # ── Request ───────────────────────────────────────────────────────────────────
@@ -167,3 +167,59 @@ class AnalyzeResponse(BaseModel):
     storage_analysis: Optional[StorageAnalysis] = None
 
     llm_explanation: str
+
+
+# ── User profile ──────────────────────────────────────────────────────────────
+
+class UserProfile(BaseModel):
+    farm_address: Optional[str] = None
+    preferred_commodity: Optional[str] = None
+
+
+# ── Saved analysis history ────────────────────────────────────────────────────
+
+class SavedAnalysis(BaseModel):
+    id: str
+    commodity: str
+    quantity_bu: float
+    farm_address: Optional[str] = None
+    created_at: str
+    response_json: dict[str, Any]
+
+
+# ── Basis alerts ──────────────────────────────────────────────────────────────
+
+class BasisAlertCreate(BaseModel):
+    commodity: str = Field(..., pattern="^(soybeans|corn|wheat)$")
+    farm_address: str
+    target_basis: float
+    direction: str = Field(..., pattern="^(above|below)$")
+
+class BasisAlert(BaseModel):
+    id: str
+    commodity: str
+    farm_address: str
+    target_basis: float
+    direction: str
+    triggered: bool
+    triggered_at: Optional[str] = None
+    triggered_basis: Optional[float] = None
+    created_at: str
+
+
+# ── Seasonal calendar ─────────────────────────────────────────────────────────
+
+class CalendarMonth(BaseModel):
+    month: int
+    month_name: str
+    avg_change_pct: float
+    volatility_pct: float
+    signal: str   # "bullish" | "bearish" | "neutral"
+
+class CalendarResponse(BaseModel):
+    commodity: str
+    months: list[CalendarMonth]
+    best_months: list[int]
+    worst_months: list[int]
+    current_month: int
+    current_signal: str

@@ -9,3 +9,4 @@ numpy
 python-dotenv
 google-genai
 geopy
+supabase

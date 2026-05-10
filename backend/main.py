@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -22,6 +23,7 @@ from backend.fetchers.weather import get_weather_data
 from backend.fetchers.news import get_ag_headlines
 from backend.fetchers.nearby_elevators import get_nearby_elevators
 from backend.llm import get_llm_explanation
+from backend.routers import profile, analyses, alerts, calendar
 
 app = FastAPI(title="Silo API", version="2.0.0")
 
@@ -31,6 +33,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(profile.router)
+app.include_router(analyses.router)
+app.include_router(alerts.router)
+app.include_router(calendar.router)
+
+# ── Market cache ──────────────────────────────────────────────────────────────
+# Futures/diesel/tbill: 5-min TTL. News: 30-min TTL (changes slowly).
+_market_cache: dict = {}
+_MARKET_TTL   = 5 * 60   # seconds
+_NEWS_TTL     = 30 * 60
 
 
 @app.get("/health")
@@ -55,8 +68,27 @@ def market_context(location: str = "Decatur, IL"):
     """
     Market context dashboard endpoint — no farmer input required.
     Returns live futures quotes, economic indicators, weather, and ag headlines.
-    Used as the default homepage when farmers are not in harvest season.
+    Cached: market data 5 min, news 30 min (keyed by location).
     """
+    now = time.time()
+    mkey = f"market:{location}"
+    nkey = f"news:{location}"
+
+    # Serve from cache if fresh
+    if mkey in _market_cache and now - _market_cache[mkey]["ts"] < _MARKET_TTL:
+        cached = _market_cache[mkey]["data"]
+        # Swap in fresh news only if news cache is also still warm
+        if nkey in _market_cache and now - _market_cache[nkey]["ts"] < _NEWS_TTL:
+            return cached
+        # News stale — refresh just headlines
+        raw_headlines = get_ag_headlines(max_per_feed=3)
+        headlines = [NewsHeadline(**h) for h in raw_headlines]
+        _market_cache[nkey] = {"ts": now, "data": headlines}
+        result = MarketContextResponse(**{**cached.model_dump(), "headlines": headlines})
+        _market_cache[mkey]["data"] = result
+        return result
+
+    # Full refresh
     commodities = ["corn", "soybeans", "wheat"]
     quotes = []
     for commodity in commodities:
@@ -72,10 +104,15 @@ def market_context(location: str = "Decatur, IL"):
     diesel = get_diesel_price()
     tbill  = get_tbill_rate()
     wx     = get_weather_data(location)
-    raw_headlines = get_ag_headlines(max_per_feed=3)
-    headlines = [NewsHeadline(**h) for h in raw_headlines]
 
-    return MarketContextResponse(
+    if nkey in _market_cache and now - _market_cache[nkey]["ts"] < _NEWS_TTL:
+        headlines = _market_cache[nkey]["data"]
+    else:
+        raw_headlines = get_ag_headlines(max_per_feed=3)
+        headlines = [NewsHeadline(**h) for h in raw_headlines]
+        _market_cache[nkey] = {"ts": now, "data": headlines}
+
+    result = MarketContextResponse(
         quotes=quotes,
         diesel_per_gal=round(diesel, 3),
         tbill_rate_pct=round(tbill, 2),
@@ -83,6 +120,8 @@ def market_context(location: str = "Decatur, IL"):
         weather_risk=wx["risk_level"],
         headlines=headlines,
     )
+    _market_cache[mkey] = {"ts": now, "data": result}
+    return result
 
 
 @app.get("/history/{commodity}", response_model=PriceHistoryResponse)
